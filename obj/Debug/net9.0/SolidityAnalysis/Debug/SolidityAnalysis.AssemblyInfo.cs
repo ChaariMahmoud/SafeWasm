@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SolidityAnalysis")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.1-alpha+92c8aa95e8280afd995b573e37f1321849507026")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.1-alpha+ded6dad5d271a0d9d913844d67f4bcfb9cb59a7c")]
 [assembly: System.Reflection.AssemblyProductAttribute("SolidityAnalysis")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SolidityAnalysis")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.1.0")]
