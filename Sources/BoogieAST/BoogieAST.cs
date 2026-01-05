@@ -23,7 +23,8 @@ namespace BoogieAST
             return root;
         }
     }
-        public class Pfloat
+
+    public class Pfloat
     {
         public float Value { get; set; }
 
@@ -31,22 +32,21 @@ namespace BoogieAST
         {
             Value = value;
         }
-public override string ToString()
-{
-    if (Value % 1 == 0)
-    {
-        return ((int)Value).ToString() + ".0";
-    }
-    else
-    {
-        return Value.ToString();
-    }
-}
 
+        public override string ToString()
+        {
+            if (Value % 1 == 0)
+            {
+                return ((int)Value).ToString() + ".0";
+            }
+            else
+            {
+                return Value.ToString();
+            }
+        }
     }
-    public abstract class BoogieASTNode
-    {
-    }
+
+    public abstract class BoogieASTNode { }
 
     public abstract class BoogieDeclaration : BoogieASTNode
     {
@@ -77,48 +77,48 @@ public override string ToString()
             return builder.ToString();
         }
     }
+
     // Une nouvelle déclaration Boogie: function f(...) : T { <expr> }
-public class BoogieFunctionDef : BoogieDeclaration
-{
-    public string Name { get; }
-    public List<BoogieVariable> InParams { get; }
-    public BoogieType ReturnType { get; }
-    public BoogieExpr Body { get; }
-
-    public BoogieFunctionDef(string name,
-                             List<BoogieVariable> inParams,
-                             BoogieType returnType,
-                             BoogieExpr body)
+    public class BoogieFunctionDef : BoogieDeclaration
     {
-        Name = name;
-        InParams = inParams ?? new();
-        ReturnType = returnType;
-        Body = body;
-    }
+        public string Name { get; }
+        public List<BoogieVariable> InParams { get; }
+        public BoogieType ReturnType { get; }
+        public BoogieExpr Body { get; }
 
-    public override string ToString()
-    {
-        // formater les paramètres
-        string fmt(BoogieVariable v) => $"{v.TypedIdent.Name}: {v.TypedIdent.Type}";
-        var args = string.Join(", ", InParams.ConvertAll(fmt));
+        public BoogieFunctionDef(
+            string name,
+            List<BoogieVariable> inParams,
+            BoogieType returnType,
+            BoogieExpr body
+        )
+        {
+            Name = name;
+            InParams = inParams ?? new();
+            ReturnType = returnType;
+            Body = body;
+        }
 
-        return
-$@"function {Name}({args}) : {ReturnType}
+        public override string ToString()
+        {
+            // formater les paramètres
+            string fmt(BoogieVariable v) => $"{v.TypedIdent.Name}: {v.TypedIdent.Type}";
+            var args = string.Join(", ", InParams.ConvertAll(fmt));
+
+            return $@"function {Name}({args}) : {ReturnType}
 {{
   {Body}
 }}
 ";
+        }
     }
-}
-
 
     public abstract class BoogieNamedDecl : BoogieDeclaration
     {
         public string Name { get; set; }
     }
-    
 
-     public class BoogieLabelCmd : BoogieStmt
+    public class BoogieLabelCmd : BoogieStmt
     {
         public string Label { get; }
 
@@ -135,7 +135,7 @@ $@"function {Name}({args}) : {ReturnType}
         public abstract override string ToString();
     }
 
-public class BoogieFunctionCall : BoogieExpr
+    public class BoogieFunctionCall : BoogieExpr
     {
         public string FunctionName { get; }
         public List<BoogieExpr> Arguments { get; }
@@ -177,7 +177,12 @@ public class BoogieFunctionCall : BoogieExpr
             }
             else
             {
-                builder.Append("type ").Append(Name).Append(" = ").Append(EquivType).AppendLine(";");
+                builder
+                    .Append("type ")
+                    .Append(Name)
+                    .Append(" = ")
+                    .Append(EquivType)
+                    .AppendLine(";");
             }
 
             return builder.ToString();
@@ -252,13 +257,22 @@ public class BoogieFunctionCall : BoogieExpr
         public List<BoogieVariable> OutParams;
 
         public List<BoogieGlobalVariable> ModSet;
-     }
+    }
 
     public class BoogieProcedure : BoogieDeclWithFormals
     {
         List<BoogieExpr> preConditions;
         List<BoogieExpr> postConditions;
-        public BoogieProcedure(string name, List<BoogieVariable> inParams, List<BoogieVariable> outParams, List<BoogieAttribute> attributes = null, List<BoogieGlobalVariable> modSet = null, List<BoogieExpr> pre = null, List<BoogieExpr> post = null)
+
+        public BoogieProcedure(
+            string name,
+            List<BoogieVariable> inParams,
+            List<BoogieVariable> outParams,
+            List<BoogieAttribute> attributes = null,
+            List<BoogieGlobalVariable> modSet = null,
+            List<BoogieExpr> pre = null,
+            List<BoogieExpr> post = null
+        )
         {
             this.Name = name;
             this.InParams = inParams;
@@ -303,7 +317,7 @@ public class BoogieFunctionCall : BoogieExpr
             builder.AppendLine(";");
             if (ModSet != null)
             {
-                foreach(var m in ModSet)
+                foreach (var m in ModSet)
                 {
                     builder.AppendLine($"modifies {m.Name};");
                 }
@@ -324,24 +338,30 @@ public class BoogieFunctionCall : BoogieExpr
             }
             return builder.ToString();
         }
+
         public void AddPreConditions(List<BoogieExpr> pres)
         {
             if (preConditions == null)
                 preConditions = new List<BoogieExpr>();
             preConditions.AddRange(pres);
         }
+
         public void AddPostConditions(List<BoogieExpr> posts)
         {
             if (postConditions == null)
                 postConditions = new List<BoogieExpr>();
             postConditions.AddRange(posts);
         }
-
     }
 
     public class BoogieFunction : BoogieDeclWithFormals
     {
-        public BoogieFunction(string name, List<BoogieVariable> inParams, List<BoogieVariable> outParams, List<BoogieAttribute> attributes = null)
+        public BoogieFunction(
+            string name,
+            List<BoogieVariable> inParams,
+            List<BoogieVariable> outParams,
+            List<BoogieAttribute> attributes = null
+        )
         {
             this.Name = name;
             this.InParams = inParams;
@@ -383,12 +403,12 @@ public class BoogieFunctionCall : BoogieExpr
             builder.AppendLine(";");
             return builder.ToString();
         }
-
     }
 
     public class BoogieAxiom : BoogieDeclaration
     {
         BoogieExpr BExpr;
+
         public BoogieAxiom(BoogieExpr bExpr)
         {
             BExpr = bExpr;
@@ -406,7 +426,14 @@ public class BoogieFunctionCall : BoogieExpr
 
         public BoogieStmtList StructuredStmts { get; set; }
 
-        public BoogieImplementation(string name, List<BoogieVariable> inParams, List<BoogieVariable> outParams, List<BoogieVariable> localVars, BoogieStmtList stmts, List<BoogieAttribute> attributes = null)
+        public BoogieImplementation(
+            string name,
+            List<BoogieVariable> inParams,
+            List<BoogieVariable> outParams,
+            List<BoogieVariable> localVars,
+            BoogieStmtList stmts,
+            List<BoogieAttribute> attributes = null
+        )
         {
             this.Name = name;
             this.InParams = inParams;
@@ -427,7 +454,7 @@ public class BoogieFunctionCall : BoogieExpr
                     builder.Append(attribute).Append(" ");
                 }
             }
-                
+
             builder.Append(Name).Append("(");
             if (InParams.Count > 0)
             {
@@ -464,8 +491,12 @@ public class BoogieFunctionCall : BoogieExpr
     public abstract class BoogieType : BoogieASTNode
     {
         public static readonly BoogieType Int = new BoogieBasicType(BoogieBasicType.SimpleType.INT);
-        public static readonly BoogieType Bool = new BoogieBasicType(BoogieBasicType.SimpleType.BOOL);
-        public static readonly BoogieType Real = new BoogieBasicType(BoogieBasicType.SimpleType.REAL);
+        public static readonly BoogieType Bool = new BoogieBasicType(
+            BoogieBasicType.SimpleType.BOOL
+        );
+        public static readonly BoogieType Real = new BoogieBasicType(
+            BoogieBasicType.SimpleType.REAL
+        );
         public static readonly BoogieType Ref = new BoogieCtorType("Ref");
     }
 
@@ -931,10 +962,7 @@ public class BoogieFunctionCall : BoogieExpr
         public BoogieGotoCmd(string labelName)
         {
             Debug.Assert(labelName != null);
-            this.LabelNames = new List<string>()
-            {
-                labelName
-            };
+            this.LabelNames = new List<string>() { labelName };
         }
 
         public BoogieGotoCmd(List<string> labelNames)
@@ -986,14 +1014,14 @@ public class BoogieFunctionCall : BoogieExpr
         }
     }
 
-public class BoogieSkipCmd : BoogieCmd
-{
-    public string Label { get; set; }
-
-    public BoogieSkipCmd(string label = null)
+    public class BoogieSkipCmd : BoogieCmd
     {
-        this.Label = label;
-    }
+        public string Label { get; set; }
+
+        public BoogieSkipCmd(string label = null)
+        {
+            this.Label = label;
+        }
 
         public override string ToString()
         {
@@ -1006,9 +1034,9 @@ public class BoogieSkipCmd : BoogieCmd
                     builder.Append(":");
                 builder.AppendLine();
             }
-        return builder.ToString();
+            return builder.ToString();
+        }
     }
-}
 
     public class BoogieCommentCmd : BoogieCmd
     {
@@ -1027,10 +1055,8 @@ public class BoogieSkipCmd : BoogieCmd
         }
     }
 
-    public abstract class BoogieStructuredCmd : BoogieCmd
-    {
-    }
-    
+    public abstract class BoogieStructuredCmd : BoogieCmd { }
+
     public class BoogieWildcardExpr : BoogieExpr
     {
         public override string ToString()
@@ -1063,7 +1089,10 @@ public class BoogieSkipCmd : BoogieCmd
             {
                 builder.AppendLine("}");
             }
-            else if (ElseBody.StatementCount() == 1 && ElseBody.BigBlocks[0].SimpleCmds[0] is BoogieIfCmd)
+            else if (
+                ElseBody.StatementCount() == 1
+                && ElseBody.BigBlocks[0].SimpleCmds[0] is BoogieIfCmd
+            )
             {
                 builder.Append("} else ").Append(ElseBody);
             }
@@ -1084,17 +1113,25 @@ public class BoogieSkipCmd : BoogieCmd
 
         public BoogieStmtList Body { get; set; }
 
-        public BoogieWhileCmd(BoogieExpr guard, BoogieStmtList body, List<BoogieExpr> invariants = null)
+        public BoogieWhileCmd(
+            BoogieExpr guard,
+            BoogieStmtList body,
+            List<BoogieExpr> invariants = null
+        )
         {
             this.Guard = guard;
             this.Body = body;
             this.Invariants =
-                invariants == null ?
-                new List<BoogiePredicateCmd>() :
-                invariants.Select(x => new BoogieLoopInvCmd(x)).ToList<BoogiePredicateCmd>();
+                invariants == null
+                    ? new List<BoogiePredicateCmd>()
+                    : invariants.Select(x => new BoogieLoopInvCmd(x)).ToList<BoogiePredicateCmd>();
         }
 
-        public BoogieWhileCmd(BoogieExpr guard, BoogieStmtList body, List<BoogiePredicateCmd> invariants)
+        public BoogieWhileCmd(
+            BoogieExpr guard,
+            BoogieStmtList body,
+            List<BoogiePredicateCmd> invariants
+        )
         {
             this.Guard = guard;
             this.Body = body;
@@ -1141,9 +1178,7 @@ public class BoogieSkipCmd : BoogieCmd
         }
     }
 
-    public class BoogieExpr : BoogieASTNode
-    {
-    }
+    public class BoogieExpr : BoogieASTNode { }
 
     public class BoogieLiteralExpr : BoogieExpr
     {
@@ -1158,10 +1193,12 @@ public class BoogieSkipCmd : BoogieCmd
         {
             this.Val = num;
         }
+
         public BoogieLiteralExpr(Pfloat num)
         {
             this.Val = num;
         }
+
         public override string ToString()
         {
             if (Val is bool)
@@ -1205,7 +1242,8 @@ public class BoogieSkipCmd : BoogieCmd
 
         public BoogieMapSelect(BoogieExpr baseExpr, BoogieExpr indexExpr)
         {
-            this.BaseExpr = baseExpr; ;
+            this.BaseExpr = baseExpr;
+            ;
             this.Arguments = new List<BoogieExpr>();
             this.Arguments.Add(indexExpr);
         }
@@ -1243,7 +1281,8 @@ public class BoogieSkipCmd : BoogieCmd
 
         public BoogieMapUpdate(BoogieExpr baseExpr, BoogieExpr indexExpr, BoogieExpr value)
         {
-            this.BaseExpr = baseExpr; ;
+            this.BaseExpr = baseExpr;
+            ;
             this.Arguments = new List<BoogieExpr>();
             this.Arguments.Add(indexExpr);
             this.Value = value;
@@ -1264,7 +1303,6 @@ public class BoogieSkipCmd : BoogieCmd
             return builder.ToString();
         }
     }
-
 
     public class BoogieUnaryOperation : BoogieExpr
     {
@@ -1329,7 +1367,7 @@ public class BoogieSkipCmd : BoogieCmd
         }
 
         public static bool USE_ARITH_OPS { get; set; }
-        
+
         public Opcode Op { get; set; }
 
         public BoogieExpr Lhs { get; set; }
@@ -1363,9 +1401,9 @@ public class BoogieSkipCmd : BoogieCmd
                 case Opcode.MUL:
                     return "*";
                 case Opcode.DIV:
-                    return   "/";
+                    return "/";
                 case Opcode.MOD:
-                    return  "%";
+                    return "%";
                 case Opcode.EQ:
                     return "==";
                 case Opcode.NEQ:
@@ -1430,7 +1468,13 @@ public class BoogieSkipCmd : BoogieCmd
         // let us limit us to a single trigger only {e1, e2, ... }
         public List<BoogieExpr> Trigger { get; set; }
 
-        public BoogieQuantifiedExpr(bool isForall, List<BoogieIdentifierExpr> qvars, List<BoogieType> qvarTypes, BoogieExpr bodyExpr, List<BoogieExpr> trigger = null)
+        public BoogieQuantifiedExpr(
+            bool isForall,
+            List<BoogieIdentifierExpr> qvars,
+            List<BoogieType> qvarTypes,
+            BoogieExpr bodyExpr,
+            List<BoogieExpr> trigger = null
+        )
         {
             this.IsForall = isForall;
             this.QVars = qvars;
@@ -1446,18 +1490,18 @@ public class BoogieSkipCmd : BoogieCmd
             var quantifierString = IsForall ? "forall " : "exists";
             var results = QVars.Zip(QVarTypes, (x, y) => x + ":" + y.ToString());
             var qVarsString = string.Join(", ", results);
-            var triggerString = ""; 
+            var triggerString = "";
             if (Trigger != null && Trigger.Count > 0)
                 triggerString = "{" + string.Join(", ", Trigger.Select(x => x.ToString())) + "}";
-            return $"{quantifierString} {qVarsString} :: {triggerString} ({BodyExpr.ToString()})"; 
+            return $"{quantifierString} {qVarsString} :: {triggerString} ({BodyExpr.ToString()})";
         }
     }
 
     public class BoogieFuncCallExpr : BoogieExpr
     {
-        public string Function { get; set;}
+        public string Function { get; set; }
 
-        public List<BoogieExpr> Arguments { get; set;}
+        public List<BoogieExpr> Arguments { get; set; }
 
         public BoogieFuncCallExpr(string function, List<BoogieExpr> arguments)
         {
@@ -1471,6 +1515,7 @@ public class BoogieSkipCmd : BoogieCmd
             return $"{Function}({argString})";
         }
     }
+
     public class BoogieTupleExpr : BoogieExpr
     {
         public List<BoogieExpr> Arguments { get; set; }
@@ -1486,5 +1531,4 @@ public class BoogieSkipCmd : BoogieCmd
             return $"({argString})";
         }
     }
-
 }

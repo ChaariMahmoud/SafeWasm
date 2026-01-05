@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using WasmToBoogie.Parser.Ast;
 using SharedConfig;
+using WasmToBoogie.Parser.Ast;
 
 namespace WasmToBoogie.Parser
 {
@@ -58,7 +58,7 @@ namespace WasmToBoogie.Parser
                     LocalGetNode g => g.Index ?? TryParseAutoName(g.Name),
                     LocalSetNode s => s.Index ?? TryParseAutoName(s.Name),
                     LocalTeeNode t => t.Index ?? TryParseAutoName(t.Name),
-                    _ => null
+                    _ => null,
                 };
             }
 
@@ -69,35 +69,44 @@ namespace WasmToBoogie.Parser
                     case LocalGetNode:
                     case LocalSetNode:
                     case LocalTeeNode:
-                        {
-                            var k = TryName(n);
-                            if (k.HasValue) max = Math.Max(max, k.Value);
+                    {
+                        var k = TryName(n);
+                        if (k.HasValue)
+                            max = Math.Max(max, k.Value);
 
-                            // Also dive into folded value in LocalSet
-                            if (n is LocalSetNode s && s.Value != null) Walk(s.Value);
-                            break;
-                        }
+                        // Also dive into folded value in LocalSet
+                        if (n is LocalSetNode s && s.Value != null)
+                            Walk(s.Value);
+                        break;
+                    }
 
                     case UnaryOpNode u:
-                        if (u.Operand != null) Walk(u.Operand);
+                        if (u.Operand != null)
+                            Walk(u.Operand);
                         break;
 
                     case BinaryOpNode b:
-                        Walk(b.Left); Walk(b.Right);
+                        Walk(b.Left);
+                        Walk(b.Right);
                         break;
 
                     case IfNode iff:
                         Walk(iff.Condition);
-                        foreach (var m in iff.ThenBody) Walk(m);
-                        if (iff.ElseBody != null) foreach (var m in iff.ElseBody) Walk(m);
+                        foreach (var m in iff.ThenBody)
+                            Walk(m);
+                        if (iff.ElseBody != null)
+                            foreach (var m in iff.ElseBody)
+                                Walk(m);
                         break;
 
                     case BlockNode blk:
-                        foreach (var m in blk.Body) Walk(m);
+                        foreach (var m in blk.Body)
+                            Walk(m);
                         break;
 
                     case LoopNode lp:
-                        foreach (var m in lp.Body) Walk(m);
+                        foreach (var m in lp.Body)
+                            Walk(m);
                         break;
 
                     case BrIfNode brIf:
@@ -105,7 +114,9 @@ namespace WasmToBoogie.Parser
                         break;
 
                     case CallNode c:
-                        if (c.Args != null) foreach (var a in c.Args) Walk(a);
+                        if (c.Args != null)
+                            foreach (var a in c.Args)
+                                Walk(a);
                         break;
 
                     case SelectNode s:
@@ -129,7 +140,8 @@ namespace WasmToBoogie.Parser
                 }
             }
 
-            foreach (var n in body) Walk(n);
+            foreach (var n in body)
+                Walk(n);
             return max; // -1 means “no locals referenced”
         }
 
@@ -164,15 +176,20 @@ namespace WasmToBoogie.Parser
                     if (namePtr != IntPtr.Zero)
                     {
                         var nm = Marshal.PtrToStringAnsi(namePtr);
-                        if (!string.IsNullOrEmpty(nm)) funcName = "$" + nm; // keep '$' to match sanitizer later
+                        if (!string.IsNullOrEmpty(nm))
+                            funcName = "$" + nm; // keep '$' to match sanitizer later
                     }
                 }
-                catch { /* wrapper may lack this symbol */ }
+                catch
+                { /* wrapper may lack this symbol */
+                }
 
                 // body text (temp module)
                 IntPtr bodyPtr = GetFunctionBodyText(modulePtr, fi);
-                string watBody = bodyPtr != IntPtr.Zero ? (Marshal.PtrToStringAnsi(bodyPtr) ?? "") : "";
-                if (bodyPtr != IntPtr.Zero) FreeCString(bodyPtr);
+                string watBody =
+                    bodyPtr != IntPtr.Zero ? (Marshal.PtrToStringAnsi(bodyPtr) ?? "") : "";
+                if (bodyPtr != IntPtr.Zero)
+                    FreeCString(bodyPtr);
 
                 Console.WriteLine($"\n📄 Extracted body of function #{fi}:\n{watBody}");
 
@@ -181,39 +198,48 @@ namespace WasmToBoogie.Parser
 
                 int idx = 0;
                 var body = new List<WasmNode>();
-while (idx < tokens.Count)
-{
-    if (tokens[idx] == ")")
-    {
-        // These are often the closers of the wrapping (module ...) we already consumed.
-        // Don't send them to ParseNode (it throws by design).
-        Console.WriteLine($"↩️ Skipping stray ')' at index {idx}");
-        idx++;
-        continue;
-    }
+                while (idx < tokens.Count)
+                {
+                    if (tokens[idx] == ")")
+                    {
+                        // These are often the closers of the wrapping (module ...) we already consumed.
+                        // Don't send them to ParseNode (it throws by design).
+                        Console.WriteLine($"↩️ Skipping stray ')' at index {idx}");
+                        idx++;
+                        continue;
+                    }
 
-    Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
-    body.Add(ParseNode(tokens, ref idx));Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
-}
+                    Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
+                    body.Add(ParseNode(tokens, ref idx));
+                    Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
+                }
 
                 var func = new WasmFunction { Body = body, Name = funcName };
-int paramCount = 0;
-try { paramCount = GetFunctionParamCount(modulePtr, fi); } catch { }
-func.ParamCount = Math.Max(0, paramCount);
+                int paramCount = 0;
+                try
+                {
+                    paramCount = GetFunctionParamCount(modulePtr, fi);
+                }
+                catch { }
+                func.ParamCount = Math.Max(0, paramCount);
 
-// 3.2) Compter les résultats via le wrapper  // NEW
-int resultCount = 0;
-try { resultCount = GetFunctionResultCount(modulePtr, fi); } catch { }  // NEW
-func.ResultCount = Math.Max(0, resultCount);                             // NEW
-                
+                // 3.2) Compter les résultats via le wrapper  // NEW
+                int resultCount = 0;
+                try
+                {
+                    resultCount = GetFunctionResultCount(modulePtr, fi);
+                }
+                catch { } // NEW
+                func.ResultCount = Math.Max(0, resultCount); // NEW
+
                 // infer local count by scanning references
                 int maxIdx = ComputeMaxLocalIndexInBody(func.Body);
                 int total = (maxIdx >= 0 ? (maxIdx + 1) : 0);
-               // if (total < func.ParamCount) total = func.ParamCount;
-               // func.LocalCount = Math.Max(0, total - func.ParamCount);
+                // if (total < func.ParamCount) total = func.ParamCount;
+                // func.LocalCount = Math.Max(0, total - func.ParamCount);
 
                 if (func.LocalCount + func.ParamCount < total)
-                func.LocalCount = Math.Max(0, total - func.ParamCount);
+                    func.LocalCount = Math.Max(0, total - func.ParamCount);
 
                 // fill $0..$N mapping
                 for (int k = 0; k < func.ParamCount + func.LocalCount; k++)
@@ -222,7 +248,9 @@ func.ResultCount = Math.Max(0, resultCount);                             // NEW
                 // try to parse header for explicit names/slots
                 PopulateFunctionSignature(tokens, func);
 
-                Console.WriteLine($"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}");
+                Console.WriteLine(
+                    $"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}"
+                );
 
                 module.Functions.Add(func);
             }
@@ -246,65 +274,78 @@ func.ResultCount = Math.Max(0, resultCount);                             // NEW
                 switch (n)
                 {
                     case LocalGetNode g:
-                        {
-                            var k = g.Index ?? TryParseAutoName(g.Name);
-                            if (k.HasValue) maxIdx = Math.Max(maxIdx, k.Value);
-                            break;
-                        }
+                    {
+                        var k = g.Index ?? TryParseAutoName(g.Name);
+                        if (k.HasValue)
+                            maxIdx = Math.Max(maxIdx, k.Value);
+                        break;
+                    }
                     case LocalSetNode s:
+                    {
+                        var k = s.Index ?? TryParseAutoName(s.Name);
+                        if (k.HasValue)
                         {
-                            var k = s.Index ?? TryParseAutoName(s.Name);
-                            if (k.HasValue)
-                            {
-                                maxIdx = Math.Max(maxIdx, k.Value);
-                                assigned.Add(k.Value);
-                            }
-                            if (s.Value != null) Walk(s.Value);
-                            break;
+                            maxIdx = Math.Max(maxIdx, k.Value);
+                            assigned.Add(k.Value);
                         }
+                        if (s.Value != null)
+                            Walk(s.Value);
+                        break;
+                    }
                     case LocalTeeNode t:
+                    {
+                        var k = t.Index ?? TryParseAutoName(t.Name);
+                        if (k.HasValue)
                         {
-                            var k = t.Index ?? TryParseAutoName(t.Name);
-                            if (k.HasValue)
-                            {
-                                maxIdx = Math.Max(maxIdx, k.Value);
-                                assigned.Add(k.Value);
-                            }
-                            break;
+                            maxIdx = Math.Max(maxIdx, k.Value);
+                            assigned.Add(k.Value);
                         }
+                        break;
+                    }
                     case UnaryOpNode u:
-                        if (u.Operand != null) Walk(u.Operand);
+                        if (u.Operand != null)
+                            Walk(u.Operand);
                         break;
                     case BinaryOpNode b:
-                        Walk(b.Left); Walk(b.Right);
+                        Walk(b.Left);
+                        Walk(b.Right);
                         break;
                     case IfNode iff:
                         Walk(iff.Condition);
-                        foreach (var m in iff.ThenBody) Walk(m);
-                        if (iff.ElseBody != null) foreach (var m in iff.ElseBody) Walk(m);
+                        foreach (var m in iff.ThenBody)
+                            Walk(m);
+                        if (iff.ElseBody != null)
+                            foreach (var m in iff.ElseBody)
+                                Walk(m);
                         break;
                     case BlockNode blk:
-                        foreach (var m in blk.Body) Walk(m);
+                        foreach (var m in blk.Body)
+                            Walk(m);
                         break;
                     case LoopNode lp:
-                        foreach (var m in lp.Body) Walk(m);
+                        foreach (var m in lp.Body)
+                            Walk(m);
                         break;
                     case BrIfNode brIf:
                         Walk(brIf.Condition);
                         break;
                     case CallNode c:
-                        foreach (var a in c.Args) Walk(a);
+                        foreach (var a in c.Args)
+                            Walk(a);
                         break;
                 }
             }
 
-            foreach (var n in func.Body) Walk(n);
+            foreach (var n in func.Body)
+                Walk(n);
 
             int total = maxIdx + 1;
-            if (total <= 0) return;
+            if (total <= 0)
+                return;
 
             int paramCount = assigned.Count > 0 ? assigned.Min() : total;
-            if (paramCount < 0 || paramCount > total) paramCount = total;
+            if (paramCount < 0 || paramCount > total)
+                paramCount = total;
 
             func.ParamCount = paramCount;
             func.LocalCount = total - paramCount;
@@ -314,117 +355,147 @@ func.ResultCount = Math.Max(0, resultCount);                             // NEW
         }
 
         private static readonly HashSet<string> NumTypes = new(StringComparer.Ordinal)
-        { "i32","i64","f32","f64" };
+        {
+            "i32",
+            "i64",
+            "f32",
+            "f64",
+        };
 
         private static int? TryParseAutoName(string? name)
         {
-            if (!string.IsNullOrEmpty(name) && name![0] == '$' &&
-                int.TryParse(name.AsSpan(1), out var k)) return k;
+            if (
+                !string.IsNullOrEmpty(name)
+                && name![0] == '$'
+                && int.TryParse(name.AsSpan(1), out var k)
+            )
+                return k;
             return null;
         }
 
-private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
-{
-    for (int i = 0; i + 1 < tokens.Count; i++)
-    {
-        if (tokens[i] == "(" && tokens[i + 1] == "func")
+        private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
         {
-            i += 2;
-            if (i < tokens.Count && tokens[i].StartsWith("$"))
+            for (int i = 0; i + 1 < tokens.Count; i++)
             {
-                func.Name ??= tokens[i];
-                i++;
-            }
-
-            int paramIndex = func.ParamCount; // prérempli par wrapper
-            int localIndex = func.LocalCount; // prérempli par inférence
-            int resultCount = func.ResultCount; // prérempli par wrapper
-
-            for (int j = i; j < tokens.Count - 1; j++)
-            {
-                if (tokens[j] != "(") continue;
-                string head = tokens[j + 1];
-
-                if (head == "param")
+                if (tokens[i] == "(" && tokens[i + 1] == "func")
                 {
-                    j += 2;
-                    while (j < tokens.Count && tokens[j] != ")")
+                    i += 2;
+                    if (i < tokens.Count && tokens[i].StartsWith("$"))
                     {
-                        if (tokens[j].StartsWith("$"))
+                        func.Name ??= tokens[i];
+                        i++;
+                    }
+
+                    int paramIndex = func.ParamCount; // prérempli par wrapper
+                    int localIndex = func.LocalCount; // prérempli par inférence
+                    int resultCount = func.ResultCount; // prérempli par wrapper
+
+                    for (int j = i; j < tokens.Count - 1; j++)
+                    {
+                        if (tokens[j] != "(")
+                            continue;
+                        string head = tokens[j + 1];
+
+                        if (head == "param")
                         {
-                            string name = tokens[j]; j++;
-                            if (j < tokens.Count && NumTypes.Contains(tokens[j]))
+                            j += 2;
+                            while (j < tokens.Count && tokens[j] != ")")
                             {
-                                func.LocalIndexByName[name] = paramIndex;
-                                paramIndex++;
-                                j++;
+                                if (tokens[j].StartsWith("$"))
+                                {
+                                    string name = tokens[j];
+                                    j++;
+                                    if (j < tokens.Count && NumTypes.Contains(tokens[j]))
+                                    {
+                                        func.LocalIndexByName[name] = paramIndex;
+                                        paramIndex++;
+                                        j++;
+                                    }
+                                    else
+                                    { /* ignore */
+                                    }
+                                }
+                                else if (NumTypes.Contains(tokens[j]))
+                                {
+                                    paramIndex++;
+                                    j++;
+                                }
+                                else
+                                    j++;
                             }
-                            else { /* ignore */ }
+                            func.ParamCount = paramIndex;
                         }
-                        else if (NumTypes.Contains(tokens[j]))
+                        else if (head == "local")
                         {
-                            paramIndex++; j++;
-                        }
-                        else j++;
-                    }
-                    func.ParamCount = paramIndex;
-                }
-                else if (head == "local")
-                {
-                    j += 2;
-                    while (j < tokens.Count && tokens[j] != ")")
-                    {
-                        if (tokens[j].StartsWith("$"))
-                        {
-                            string name = tokens[j]; j++;
-                            if (j < tokens.Count && NumTypes.Contains(tokens[j]))
+                            j += 2;
+                            while (j < tokens.Count && tokens[j] != ")")
                             {
-                                func.LocalIndexByName[name] = func.ParamCount + (localIndex++);
-                                j++;
+                                if (tokens[j].StartsWith("$"))
+                                {
+                                    string name = tokens[j];
+                                    j++;
+                                    if (j < tokens.Count && NumTypes.Contains(tokens[j]))
+                                    {
+                                        func.LocalIndexByName[name] =
+                                            func.ParamCount + (localIndex++);
+                                        j++;
+                                    }
+                                    else
+                                    { /* ignore */
+                                    }
+                                }
+                                else if (NumTypes.Contains(tokens[j]))
+                                {
+                                    localIndex++;
+                                    j++;
+                                }
+                                else
+                                    j++;
                             }
-                            else { /* ignore */ }
+                            func.LocalCount = localIndex;
                         }
-                        else if (NumTypes.Contains(tokens[j]))
+                        else if (head == "result")
                         {
-                            localIndex++; j++;
+                            // (result i32) ou (result i32 i32)
+                            j += 2;
+                            int added = 0;
+                            while (j < tokens.Count && tokens[j] != ")")
+                            {
+                                if (NumTypes.Contains(tokens[j]))
+                                {
+                                    added++;
+                                    j++;
+                                }
+                                else
+                                    j++;
+                            }
+                            if (added == 0 && j < tokens.Count && tokens[j] == ")")
+                            { /* (result) vide → 0 */
+                            }
+                            resultCount += added;
+                            func.ResultCount = resultCount;
                         }
-                        else j++;
+                        else if (head == ")")
+                        {
+                            break;
+                        }
                     }
-                    func.LocalCount = localIndex;
-                }
-                else if (head == "result")
-                {
-                    // (result i32) ou (result i32 i32)
-                    j += 2;
-                    int added = 0;
-                    while (j < tokens.Count && tokens[j] != ")")
-                    {
-                        if (NumTypes.Contains(tokens[j])) { added++; j++; }
-                        else j++;
-                    }
-                    if (added == 0 && j < tokens.Count && tokens[j] == ")") { /* (result) vide → 0 */ }
-                    resultCount += added;
-                    func.ResultCount = resultCount;
-                }
-                else if (head == ")")
-                {
                     break;
                 }
             }
-            break;
+
+            // Ensure $0..$N existent
+            for (int k = 0; k < func.ParamCount + func.LocalCount; k++)
+            {
+                var auto = "$" + k.ToString();
+                if (!func.LocalIndexByName.ContainsKey(auto))
+                    func.LocalIndexByName[auto] = k;
+            }
+
+            Console.WriteLine(
+                $"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}, results={func.ResultCount}"
+            );
         }
-    }
-
-    // Ensure $0..$N existent
-    for (int k = 0; k < func.ParamCount + func.LocalCount; k++)
-    {
-        var auto = "$" + k.ToString();
-        if (!func.LocalIndexByName.ContainsKey(auto))
-            func.LocalIndexByName[auto] = k;
-    }
-
-    Console.WriteLine($"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}, results={func.ResultCount}");
-}
 
         // ---------------- label verification ----------------
 
@@ -442,9 +513,13 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
             Console.WriteLine("✅ Label verification completed successfully.");
         }
 
-        private void VerifyLabelsInNode(List<WasmNode> nodes, HashSet<string> availableLabels,
-                                        Stack<HashSet<string>> labelScopes,
-                                        Dictionary<string, int> labelDepths, int currentDepth)
+        private void VerifyLabelsInNode(
+            List<WasmNode> nodes,
+            HashSet<string> availableLabels,
+            Stack<HashSet<string>> labelScopes,
+            Dictionary<string, int> labelDepths,
+            int currentDepth
+        )
         {
             foreach (var node in nodes)
                 VerifyLabelsInNode(node, availableLabels, labelScopes, labelDepths, currentDepth);
@@ -452,18 +527,34 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
 
         private static bool IsNumericDepth(string s) => s.Length > 0 && char.IsDigit(s[0]);
 
-        private void VerifyLabelsInNode(WasmNode node, HashSet<string> availableLabels,
-                                        Stack<HashSet<string>> labelScopes,
-                                        Dictionary<string, int> labelDepths, int currentDepth)
+        private void VerifyLabelsInNode(
+            WasmNode node,
+            HashSet<string> availableLabels,
+            Stack<HashSet<string>> labelScopes,
+            Dictionary<string, int> labelDepths,
+            int currentDepth
+        )
         {
             switch (node)
             {
                 case BlockNode blockNode:
-                    VerifyBlockNode(blockNode, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyBlockNode(
+                        blockNode,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
                     break;
 
                 case LoopNode loopNode:
-                    VerifyLoopNode(loopNode, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLoopNode(
+                        loopNode,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
                     break;
 
                 case BrNode brNode:
@@ -475,35 +566,78 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                     break;
 
                 case BrTableNode bt:
+                {
+                    void CheckLab(string lab, string kind)
                     {
-                        void CheckLab(string lab, string kind)
+                        if (IsNumericDepth(lab))
+                            return;
+                        if (!availableLabels.Contains(lab))
                         {
-                            if (IsNumericDepth(lab)) return;
-                            if (!availableLabels.Contains(lab))
-                            {
-                                var avail = availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
-                                throw new Exception($"❌ Label invalide dans br_table {kind} : {lab}. Labels disponibles : {avail}");
-                            }
+                            var avail =
+                                availableLabels.Count > 0
+                                    ? string.Join(", ", availableLabels)
+                                    : "aucun";
+                            throw new Exception(
+                                $"❌ Label invalide dans br_table {kind} : {lab}. Labels disponibles : {avail}"
+                            );
                         }
-                        foreach (var t in bt.Targets) CheckLab(t, "target");
-                        CheckLab(bt.Default, "default");
-                        break;
                     }
+                    foreach (var t in bt.Targets)
+                        CheckLab(t, "target");
+                    CheckLab(bt.Default, "default");
+                    break;
+                }
 
                 case UnaryOpNode unaryNode:
-                    VerifyLabelsInNode(unaryNode.Operand, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLabelsInNode(
+                        unaryNode.Operand,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
                     break;
 
                 case BinaryOpNode binaryNode:
-                    VerifyLabelsInNode(binaryNode.Left, availableLabels, labelScopes, labelDepths, currentDepth);
-                    VerifyLabelsInNode(binaryNode.Right, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLabelsInNode(
+                        binaryNode.Left,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
+                    VerifyLabelsInNode(
+                        binaryNode.Right,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
                     break;
 
                 case IfNode ifNode:
-                    VerifyLabelsInNode(ifNode.Condition, availableLabels, labelScopes, labelDepths, currentDepth);
-                    VerifyLabelsInNode(ifNode.ThenBody, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLabelsInNode(
+                        ifNode.Condition,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
+                    VerifyLabelsInNode(
+                        ifNode.ThenBody,
+                        availableLabels,
+                        labelScopes,
+                        labelDepths,
+                        currentDepth
+                    );
                     if (ifNode.ElseBody != null)
-                        VerifyLabelsInNode(ifNode.ElseBody, availableLabels, labelScopes, labelDepths, currentDepth);
+                        VerifyLabelsInNode(
+                            ifNode.ElseBody,
+                            availableLabels,
+                            labelScopes,
+                            labelDepths,
+                            currentDepth
+                        );
                     break;
 
                 // benign nodes
@@ -517,27 +651,41 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                 case CallNode:
                 case ConstNode:
                 case RawInstructionNode:
-                //case BrTableNode:
+                    //case BrTableNode:
                     break;
             }
         }
 
-        private void VerifyBlockNode(BlockNode blockNode, HashSet<string> availableLabels,
-                                     Stack<HashSet<string>> labelScopes,
-                                     Dictionary<string, int> labelDepths, int currentDepth)
+        private void VerifyBlockNode(
+            BlockNode blockNode,
+            HashSet<string> availableLabels,
+            Stack<HashSet<string>> labelScopes,
+            Dictionary<string, int> labelDepths,
+            int currentDepth
+        )
         {
             var newScope = new HashSet<string>();
             labelScopes.Push(newScope);
             if (!string.IsNullOrEmpty(blockNode.Label))
             {
                 if (availableLabels.Contains(blockNode.Label))
-                    throw new Exception($"❌ Duplicate label found: {blockNode.Label} (depth {currentDepth})");
+                    throw new Exception(
+                        $"❌ Duplicate label found: {blockNode.Label} (depth {currentDepth})"
+                    );
                 availableLabels.Add(blockNode.Label);
                 newScope.Add(blockNode.Label);
                 labelDepths[blockNode.Label] = currentDepth;
-                Console.WriteLine($"🔹 Block label added: {blockNode.Label} (depth {currentDepth})");
+                Console.WriteLine(
+                    $"🔹 Block label added: {blockNode.Label} (depth {currentDepth})"
+                );
             }
-            VerifyLabelsInNode(blockNode.Body, availableLabels, labelScopes, labelDepths, currentDepth + 1);
+            VerifyLabelsInNode(
+                blockNode.Body,
+                availableLabels,
+                labelScopes,
+                labelDepths,
+                currentDepth + 1
+            );
             labelScopes.Pop();
             if (!string.IsNullOrEmpty(blockNode.Label))
             {
@@ -546,22 +694,34 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
             }
         }
 
-        private void VerifyLoopNode(LoopNode loopNode, HashSet<string> availableLabels,
-                                    Stack<HashSet<string>> labelScopes,
-                                    Dictionary<string, int> labelDepths, int currentDepth)
+        private void VerifyLoopNode(
+            LoopNode loopNode,
+            HashSet<string> availableLabels,
+            Stack<HashSet<string>> labelScopes,
+            Dictionary<string, int> labelDepths,
+            int currentDepth
+        )
         {
             var newScope = new HashSet<string>();
             labelScopes.Push(newScope);
             if (!string.IsNullOrEmpty(loopNode.Label))
             {
                 if (availableLabels.Contains(loopNode.Label))
-                    throw new Exception($"❌ Label dupliqué trouvé : {loopNode.Label} (profondeur {currentDepth})");
+                    throw new Exception(
+                        $"❌ Label dupliqué trouvé : {loopNode.Label} (profondeur {currentDepth})"
+                    );
                 availableLabels.Add(loopNode.Label);
                 newScope.Add(loopNode.Label);
                 labelDepths[loopNode.Label] = currentDepth;
                 Console.WriteLine($"🔹 Loop label added: {loopNode.Label} (depth {currentDepth})");
             }
-            VerifyLabelsInNode(loopNode.Body, availableLabels, labelScopes, labelDepths, currentDepth + 1);
+            VerifyLabelsInNode(
+                loopNode.Body,
+                availableLabels,
+                labelScopes,
+                labelDepths,
+                currentDepth + 1
+            );
             labelScopes.Pop();
             if (!string.IsNullOrEmpty(loopNode.Label))
             {
@@ -570,8 +730,12 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
             }
         }
 
-        private void VerifyBranchNode(WasmNode branchNode, HashSet<string> availableLabels,
-                                      string branchType, Dictionary<string, int> labelDepths)
+        private void VerifyBranchNode(
+            WasmNode branchNode,
+            HashSet<string> availableLabels,
+            string branchType,
+            Dictionary<string, int> labelDepths
+        )
         {
             static bool IsNumericDepthLocal(string s) => s.Length > 0 && char.IsDigit(s[0]);
 
@@ -579,13 +743,18 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
             {
                 BrNode brNode => brNode.Label,
                 BrIfNode brIfNode => brIfNode.Label,
-                _ => throw new ArgumentException($"Type de nœud de branchement non supporté : {branchNode.GetType()}")
+                _ => throw new ArgumentException(
+                    $"Type de nœud de branchement non supporté : {branchNode.GetType()}"
+                ),
             };
 
             if (!IsNumericDepthLocal(label) && !availableLabels.Contains(label))
             {
-                var availableLabelsList = availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
-                throw new Exception($"❌ Label invalide dans {branchType} : {label}. Labels disponibles : {availableLabelsList}");
+                var availableLabelsList =
+                    availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
+                throw new Exception(
+                    $"❌ Label invalide dans {branchType} : {label}. Labels disponibles : {availableLabelsList}"
+                );
             }
             var labelDepth = labelDepths.GetValueOrDefault(label, -1);
             Console.WriteLine($"🔹 {branchType} to valid label: {label} (depth {labelDepth})");
@@ -596,8 +765,9 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
         private List<string> Tokenize(string wat)
         {
             return new List<string>(
-                wat.Replace("(", " ( ").Replace(")", " ) ")
-                   .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                wat.Replace("(", " ( ")
+                    .Replace(")", " ) ")
+                    .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
             );
         }
 
@@ -621,8 +791,10 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                     string tok = tokens[index++];
                     int n;
                     var node = new LocalGetNode();
-                    if (tok.StartsWith("$")) node.Name = tok;
-                    else if (int.TryParse(tok, out n)) node.Index = n;
+                    if (tok.StartsWith("$"))
+                        node.Name = tok;
+                    else if (int.TryParse(tok, out n))
+                        node.Index = n;
                     ExpectToken(tokens, ref index, ")");
                     return node;
                 }
@@ -631,8 +803,10 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                     string tok = tokens[index++];
                     int n;
                     var node = new LocalSetNode();
-                    if (tok.StartsWith("$")) node.Name = tok;
-                    else if (int.TryParse(tok, out n)) node.Index = n;
+                    if (tok.StartsWith("$"))
+                        node.Name = tok;
+                    else if (int.TryParse(tok, out n))
+                        node.Index = n;
 
                     if (index < tokens.Count && tokens[index] != ")")
                         node.Value = ParseNode(tokens, ref index);
@@ -645,8 +819,10 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                     string tok = tokens[index++];
                     int n;
                     var tee = new LocalTeeNode();
-                    if (tok.StartsWith("$")) tee.Name = tok;
-                    else if (int.TryParse(tok, out n)) tee.Index = n;
+                    if (tok.StartsWith("$"))
+                        tee.Name = tok;
+                    else if (int.TryParse(tok, out n))
+                        tee.Index = n;
 
                     if (index < tokens.Count && tokens[index] != ")")
                     {
@@ -660,6 +836,35 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                         return tee;
                     }
                 }
+                else if (op == "global.get")
+                {
+                    string tok = tokens[index++];
+                    int n;
+                    var node = new GlobalGetNode();
+                    if (tok.StartsWith("$"))
+                        node.Name = tok;
+                    else if (int.TryParse(tok, out n))
+                        node.Index = n;
+                    ExpectToken(tokens, ref index, ")");
+                    return node;
+                }
+                else if (op == "global.set")
+                {
+                    string tok = tokens[index++];
+                    int n;
+                    var node = new GlobalSetNode();
+                    if (tok.StartsWith("$"))
+                        node.Name = tok;
+                    else if (int.TryParse(tok, out n))
+                        node.Index = n;
+
+                    // folded form: (global.set $g <expr>)
+                    if (index < tokens.Count && tokens[index] != ")")
+                        node.Value = ParseNode(tokens, ref index);
+
+                    ExpectToken(tokens, ref index, ")");
+                    return node;
+                }
                 else if (op == "call")
                 {
                     string tgt = tokens[index++];
@@ -671,87 +876,172 @@ private void PopulateFunctionSignature(List<string> tokens, WasmFunction func)
                     ExpectToken(tokens, ref index, ")");
                     return new CallNode { Target = tgt, Args = args };
                 }
+                else if (op == "return_call")
+                {
+                    string tgt = tokens[index++];
+
+                    var args = new List<WasmNode>();
+                    while (index < tokens.Count && tokens[index] != ")")
+                        args.Add(ParseNode(tokens, ref index));
+
+                    ExpectToken(tokens, ref index, ")");
+                    return new ReturnCallNode { Target = tgt, Args = args };
+                }
+                else if (op == "call_indirect")
+                {
+                    string? typeUse = null;
+
+                    // optional (type X)
+                    if (
+                        index < tokens.Count
+                        && tokens[index] == "("
+                        && index + 2 < tokens.Count
+                        && tokens[index + 1] == "type"
+                    )
+                    {
+                        index += 2; // skip "(" "type"
+                        typeUse = tokens[index++]; // "0" or "$t"
+                        ExpectToken(tokens, ref index, ")"); // close (type ...)
+                    }
+
+                    var exprs = new List<WasmNode>();
+                    while (index < tokens.Count && tokens[index] != ")")
+                        exprs.Add(ParseNode(tokens, ref index));
+
+                    ExpectToken(tokens, ref index, ")");
+
+                    if (exprs.Count < 1)
+                        throw new Exception("call_indirect: missing callee index expression.");
+
+                    var calleeIndex = exprs[^1];
+                    exprs.RemoveAt(exprs.Count - 1);
+
+                    return new CallIndirectNode
+                    {
+                        TypeUse = typeUse,
+                        Args = exprs,
+                        CalleeIndex = calleeIndex,
+                    };
+                }
+                else if (op == "return_call_indirect")
+                {
+                    string? typeUse = null;
+
+                    if (
+                        index < tokens.Count
+                        && tokens[index] == "("
+                        && index + 2 < tokens.Count
+                        && tokens[index + 1] == "type"
+                    )
+                    {
+                        index += 2;
+                        typeUse = tokens[index++];
+                        ExpectToken(tokens, ref index, ")");
+                    }
+
+                    var exprs = new List<WasmNode>();
+                    while (index < tokens.Count && tokens[index] != ")")
+                        exprs.Add(ParseNode(tokens, ref index));
+
+                    ExpectToken(tokens, ref index, ")");
+
+                    if (exprs.Count < 1)
+                        throw new Exception(
+                            "return_call_indirect: missing callee index expression."
+                        );
+
+                    var calleeIndex = exprs[^1];
+                    exprs.RemoveAt(exprs.Count - 1);
+
+                    return new ReturnCallIndirectNode
+                    {
+                        TypeUse = typeUse,
+                        Args = exprs,
+                        CalleeIndex = calleeIndex,
+                    };
+                }
                 else if (op == "return")
-{
-    // Accept both "(return)" and folded "(return <expr> ...)"
-    var pre = new List<WasmNode>();
-    while (index < tokens.Count && tokens[index] != ")")
-    {
-        pre.Add(ParseNode(tokens, ref index));
-    }
-    ExpectToken(tokens, ref index, ")");
+                {
+                    // Accept both "(return)" and folded "(return <expr> ...)"
+                    var pre = new List<WasmNode>();
+                    while (index < tokens.Count && tokens[index] != ")")
+                    {
+                        pre.Add(ParseNode(tokens, ref index));
+                    }
+                    ExpectToken(tokens, ref index, ")");
 
-    if (pre.Count == 0)
-    {
-        // plain "(return)"
-        return new ReturnNode();
-    }
-    else
-    {
-        // folded: evaluate the return values first, then return
-        var b = new BlockNode { Label = null };
-        foreach (var n in pre) b.Body.Add(n);
-        b.Body.Add(new ReturnNode());
-        return b;
-    }
-}
-
+                    if (pre.Count == 0)
+                    {
+                        // plain "(return)"
+                        return new ReturnNode();
+                    }
+                    else
+                    {
+                        // folded: evaluate the return values first, then return
+                        var b = new BlockNode { Label = null };
+                        foreach (var n in pre)
+                            b.Body.Add(n);
+                        b.Body.Add(new ReturnNode());
+                        return b;
+                    }
+                }
                 else if (op == "nop")
                 {
                     ExpectToken(tokens, ref index, ")");
                     return new NopNode();
                 }
-else if (op == "br_table")
-{
-    // Supporte les deux formes de WAT :
-    //  A) Canonique (operand-last): (br_table t0 t1 ... default (local.get $x))
-    //  B) Operand-first (rare):     (br_table (local.get $x) t0 t1 ... default)
+                else if (op == "br_table")
+                {
+                    // Supporte les deux formes de WAT :
+                    //  A) Canonique (operand-last): (br_table t0 t1 ... default (local.get $x))
+                    //  B) Operand-first (rare):     (br_table (local.get $x) t0 t1 ... default)
 
-    var targets = new List<string>();
-    bool sawSelector = false;
+                    var targets = new List<string>();
+                    bool sawSelector = false;
 
-    // 1) Parcourir les tokens jusqu'à la parenthèse fermante de ce br_table
-    //    - Si on voit "(", on parse une sous-expression = le sélecteur. (ParseNode consomme sa ")")
-    //    - Si on voit un atome != ")", on le considère comme une cible (label ou profondeur)
-    //    - Si on voit ")", on termine.
-    while (index < tokens.Count)
-    {
-        string tk = tokens[index];
+                    // 1) Parcourir les tokens jusqu'à la parenthèse fermante de ce br_table
+                    //    - Si on voit "(", on parse une sous-expression = le sélecteur. (ParseNode consomme sa ")")
+                    //    - Si on voit un atome != ")", on le considère comme une cible (label ou profondeur)
+                    //    - Si on voit ")", on termine.
+                    while (index < tokens.Count)
+                    {
+                        string tk = tokens[index];
 
-        if (tk == ")")
-        {
-            index++; // consomme la ') ' de (br_table ... )
-            break;
-        }
-        else if (tk == "(")
-        {
-            // Sous-expression = sélecteur
-            _ = ParseNode(tokens, ref index); // consomme entièrement le sélecteur (et sa ')')
-            sawSelector = true;
-        }
-        else
-        {
-            // Atome : soit label "$L", soit profondeur "0"/"1"/...
-            targets.Add(tk);
-            index++;
-        }
-    }
+                        if (tk == ")")
+                        {
+                            index++; // consomme la ') ' de (br_table ... )
+                            break;
+                        }
+                        else if (tk == "(")
+                        {
+                            // Sous-expression = sélecteur
+                            _ = ParseNode(tokens, ref index); // consomme entièrement le sélecteur (et sa ')')
+                            sawSelector = true;
+                        }
+                        else
+                        {
+                            // Atome : soit label "$L", soit profondeur "0"/"1"/...
+                            targets.Add(tk);
+                            index++;
+                        }
+                    }
 
-    if (!sawSelector)
-        throw new Exception("br_table: expression sélecteur absente (attendu operand-last ou operand-first).");
+                    if (!sawSelector)
+                        throw new Exception(
+                            "br_table: expression sélecteur absente (attendu operand-last ou operand-first)."
+                        );
 
-    if (targets.Count == 0)
-        throw new Exception("br_table: au moins une cible + un default sont requis.");
+                    if (targets.Count == 0)
+                        throw new Exception(
+                            "br_table: au moins une cible + un default sont requis."
+                        );
 
-    // Le dernier élément est le default
-    var def = targets[^1];
-    targets.RemoveAt(targets.Count - 1);
+                    // Le dernier élément est le default
+                    var def = targets[^1];
+                    targets.RemoveAt(targets.Count - 1);
 
-    return new BrTableNode { Targets = targets, Default = def };
-}
-
-
-
+                    return new BrTableNode { Targets = targets, Default = def };
+                }
                 else if (IsUnaryOp(op))
                 {
                     Console.WriteLine($"  🔹 UnaryOpNode : {op}");
@@ -765,7 +1055,12 @@ else if (op == "br_table")
                     var left = ParseNode(tokens, ref index);
                     var right = ParseNode(tokens, ref index);
                     ExpectToken(tokens, ref index, ")");
-                    return new BinaryOpNode { Op = op, Left = left, Right = right };
+                    return new BinaryOpNode
+                    {
+                        Op = op,
+                        Left = left,
+                        Right = right,
+                    };
                 }
                 else if (op == "block")
                 {
@@ -796,7 +1091,12 @@ else if (op == "br_table")
                     if (index < tokens.Count && tokens[index] == "(")
                         elseBody = new List<WasmNode> { ParseNode(tokens, ref index) };
                     ExpectToken(tokens, ref index, ")");
-                    return new IfNode { Condition = condition, ThenBody = thenBody, ElseBody = elseBody };
+                    return new IfNode
+                    {
+                        Condition = condition,
+                        ThenBody = thenBody,
+                        ElseBody = elseBody,
+                    };
                 }
                 else if (op == "br")
                 {
@@ -831,14 +1131,24 @@ else if (op == "br_table")
                 {
                     // (select [t] v1 v2 cond)
                     string? maybeType = (index < tokens.Count ? tokens[index] : null);
-                    if (maybeType == "i32" || maybeType == "i64" || maybeType == "f32" || maybeType == "f64")
+                    if (
+                        maybeType == "i32"
+                        || maybeType == "i64"
+                        || maybeType == "f32"
+                        || maybeType == "f64"
+                    )
                         index++; // ignore type tag
 
                     var v1 = ParseNode(tokens, ref index);
                     var v2 = ParseNode(tokens, ref index);
                     var cond = ParseNode(tokens, ref index);
                     ExpectToken(tokens, ref index, ")");
-                    return new SelectNode { V1 = v1, V2 = v2, Cond = cond };
+                    return new SelectNode
+                    {
+                        V1 = v1,
+                        V2 = v2,
+                        Cond = cond,
+                    };
                 }
                 else
                 {
@@ -865,7 +1175,9 @@ else if (op == "br_table")
                 int from = Math.Max(0, index - 5);
                 int to = Math.Min(tokens.Count - 1, index + 5);
                 var window = string.Join(" ", tokens.GetRange(from, to - from + 1));
-                throw new Exception($"❌ Parenthèse fermante inattendue. Contexte: ... {window} ...");
+                throw new Exception(
+                    $"❌ Parenthèse fermante inattendue. Contexte: ... {window} ..."
+                );
             }
             else
             {
@@ -875,29 +1187,50 @@ else if (op == "br_table")
         }
 
         private bool IsUnaryOp(string op) =>
-            op == "drop" || op.EndsWith(".eqz") || op.EndsWith(".wrap_i64");
+            op == "drop"
+            || op.EndsWith(".eqz")
+            || op.EndsWith(".wrap_i64")
+            || op.EndsWith(".abs")
+            || op.EndsWith(".neg")
+            || op.EndsWith(".sqrt");
 
         private bool IsBinaryOp(string op) =>
-            op.EndsWith(".add") || op.EndsWith(".sub") || op.EndsWith(".mul") ||
-            op.EndsWith(".div_s") || op.EndsWith(".div_u") || op.EndsWith(".div") ||
-            op.EndsWith(".eq") || op.EndsWith(".ne") ||
-            op.EndsWith(".lt_s") || op.EndsWith(".lt_u") ||
-            op.EndsWith(".le_s") || op.EndsWith(".le_u") || op.EndsWith(".le") || op.EndsWith(".lt") ||
-            op.EndsWith(".gt_s") || op.EndsWith(".gt_u") ||
-            op.EndsWith(".ge_s") || op.EndsWith(".ge_u") || op.EndsWith(".ge") || op.EndsWith(".gt");
+            op.EndsWith(".add")
+            || op.EndsWith(".sub")
+            || op.EndsWith(".mul")
+            || op.EndsWith(".div_s")
+            || op.EndsWith(".div_u")
+            || op.EndsWith(".div")
+            || op.EndsWith(".eq")
+            || op.EndsWith(".ne")
+            || op.EndsWith(".lt_s")
+            || op.EndsWith(".lt_u")
+            || op.EndsWith(".le_s")
+            || op.EndsWith(".le_u")
+            || op.EndsWith(".le")
+            || op.EndsWith(".lt")
+            || op.EndsWith(".gt_s")
+            || op.EndsWith(".gt_u")
+            || op.EndsWith(".ge_s")
+            || op.EndsWith(".ge_u")
+            || op.EndsWith(".ge")
+            || op.EndsWith(".gt")
+            || op.EndsWith(".min")
+            || op.EndsWith(".max");
 
-private void ExpectToken(List<string> tokens, ref int index, string expected)
-{
-    if (index >= tokens.Count || tokens[index] != expected)
-    {
-        int from = Math.Max(0, index - 5);
-        int to = Math.Min(tokens.Count - 1, index + 5);
-        var window = string.Join(" ", tokens.GetRange(from, to - from + 1));
-        throw new Exception($"❌ Parenthèse '{expected}' attendue. Contexte: ... {window} ...");
-    }
-    index++;
-}
-
+        private void ExpectToken(List<string> tokens, ref int index, string expected)
+        {
+            if (index >= tokens.Count || tokens[index] != expected)
+            {
+                int from = Math.Max(0, index - 5);
+                int to = Math.Min(tokens.Count - 1, index + 5);
+                var window = string.Join(" ", tokens.GetRange(from, to - from + 1));
+                throw new Exception(
+                    $"❌ Parenthèse '{expected}' attendue. Contexte: ... {window} ..."
+                );
+            }
+            index++;
+        }
 
         private string ConvertWatToWasm(string watPath)
         {
@@ -909,7 +1242,7 @@ private void ExpectToken(List<string> tokens, ref int index, string expected)
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
             };
 
             using var proc = Process.Start(psi)!;
@@ -944,10 +1277,18 @@ private void ExpectToken(List<string> tokens, ref int index, string expected)
         [DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
         private static extern void PrintModuleAST(IntPtr module);
 
-        [DllImport("libbinaryenwrapper", EntryPoint = "GetFunctionParamCount", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(
+            "libbinaryenwrapper",
+            EntryPoint = "GetFunctionParamCount",
+            CallingConvention = CallingConvention.Cdecl
+        )]
         private static extern int GetFunctionParamCount(IntPtr module, int index);
 
-        [DllImport("libbinaryenwrapper", EntryPoint = "GetFunctionResultCount", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(
+            "libbinaryenwrapper",
+            EntryPoint = "GetFunctionResultCount",
+            CallingConvention = CallingConvention.Cdecl
+        )]
         private static extern int GetFunctionResultCount(IntPtr module, int index);
     }
 }

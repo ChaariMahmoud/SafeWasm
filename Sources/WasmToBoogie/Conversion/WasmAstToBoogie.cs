@@ -1,8 +1,8 @@
-using BoogieAST;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using BoogieAST;
 using WasmToBoogie.Parser.Ast;
 
 namespace WasmToBoogie.Conversion
@@ -21,6 +21,9 @@ namespace WasmToBoogie.Conversion
         // Générateur unique pour popArgsN
         private readonly HashSet<int> popArgsMade = new();
 
+        // NEW: generator unique pour popDiscardN
+        private readonly HashSet<int> popDiscardMade = new();
+
         // État par fonction
         private List<BoogieIdentifierExpr>? currentLocalMap; // arg1..argN, loc1..locM
         private WasmFunction? currentFunction;
@@ -29,12 +32,17 @@ namespace WasmToBoogie.Conversion
         private readonly Stack<LabelContext> labelStack = new();
         private string? functionExitLabel;
 
+        // NEW: globals created lazily + modifies tracking
+        private readonly Dictionary<string, string> globalNameMap = new(StringComparer.Ordinal);
+        private readonly HashSet<string> declaredBoogieGlobals = new(StringComparer.Ordinal);
+        private HashSet<string>? currentModifiedGlobals;
+
         private class LabelContext
         {
             public string? WatLabel;
-            public string? StartLabel;   // loop "continue"
-            public string  EndLabel = ""; // block/loop end ("break")
-            public bool    IsLoop;
+            public string? StartLabel; // loop "continue"
+            public string EndLabel = ""; // block/loop end ("break")
+            public bool IsLoop;
             public bool MarkEndUsed;
         }
 
@@ -44,18 +52,21 @@ namespace WasmToBoogie.Conversion
 
         private static bool AllDigits(string s)
         {
-            if (string.IsNullOrEmpty(s)) return false;
+            if (string.IsNullOrEmpty(s))
+                return false;
             for (int i = 0; i < s.Length; i++)
-                if (s[i] < '0' || s[i] > '9') return false;
+                if (s[i] < '0' || s[i] > '9')
+                    return false;
             return true;
         }
 
-        private static string NormalizeLabel(string raw)
-            => string.IsNullOrEmpty(raw) ? raw : (raw[0] == '$' ? raw[1..] : raw);
+        private static string NormalizeLabel(string raw) =>
+            string.IsNullOrEmpty(raw) ? raw : (raw[0] == '$' ? raw[1..] : raw);
 
         private static string MapCalleeName(string target)
         {
-            if (string.IsNullOrEmpty(target)) return target;
+            if (string.IsNullOrEmpty(target))
+                return target;
             string name = target[0] == '$' ? target[1..] : target;
             return AllDigits(name) ? "func_" + name : name;
         }
@@ -65,9 +76,11 @@ namespace WasmToBoogie.Conversion
             if (!string.IsNullOrEmpty(watName))
             {
                 var n = watName![0] == '$' ? watName.Substring(1) : watName;
-                if (int.TryParse(n, out _)) return $"func_{n}";
+                if (int.TryParse(n, out _))
+                    return $"func_{n}";
                 n = Regex.Replace(n, @"[^A-Za-z0-9_]", "_");
-                if (!char.IsLetter(n[0]) && n[0] != '_') n = "_" + n;
+                if (!char.IsLetter(n[0]) && n[0] != '_')
+                    n = "_" + n;
                 return n;
             }
             return $"func_{contractName}";
@@ -75,31 +88,79 @@ namespace WasmToBoogie.Conversion
 
         private string GenerateLabel(string baseName) => $"{baseName}_{++labelCounter}";
 
+        // NEW: sanitize global name for Boogie
+        private static string SanitizeGlobalName(string raw)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return "g";
+            var n = raw[0] == '$' ? raw.Substring(1) : raw;
+            n = Regex.Replace(n, @"[^A-Za-z0-9_]", "_");
+            if (!char.IsLetter(n[0]) && n[0] != '_')
+                n = "_" + n;
+            // prefix to avoid clash
+            return "g_" + n;
+        }
+
+        private string ResolveGlobalKey(int? index, string? name)
+        {
+            if (!string.IsNullOrEmpty(name))
+                return name!;
+            if (index.HasValue)
+                return index.Value.ToString();
+            throw new NotSupportedException("Unknown global index/name");
+        }
+
+        // Ensure Boogie global exists; returns Boogie identifier name
+        private string EnsureGlobalVar(string watNameOrIndex)
+        {
+            // normalize key to always start with '$' so "$g" and "g" don't diverge
+            string key = watNameOrIndex.StartsWith("$", StringComparison.Ordinal)
+                ? watNameOrIndex
+                : "$" + watNameOrIndex;
+
+            if (!globalNameMap.TryGetValue(key, out var boogieName))
+            {
+                // keep raw key to generate stable sanitized name (e.g., "$g" -> "g_g", "$0" -> "g_0")
+                boogieName = SanitizeGlobalName(key);
+                globalNameMap[key] = boogieName;
+            }
+
+            // declare once lazily
+            if (program != null && !declaredBoogieGlobals.Contains(boogieName))
+            {
+                program.Declarations.Add(
+                    new BoogieGlobalVariable(new BoogieTypedIdent(boogieName, BoogieType.Real))
+                );
+                declaredBoogieGlobals.Add(boogieName);
+            }
+
+            return boogieName;
+        }
+
         // Résolution d'une cible de branchement (label texte ou profondeur numérique)
-private string ResolveBranchTarget(string labOrDepth)
-{
-    if (AllDigits(labOrDepth))
-    {
-        int depth = int.Parse(labOrDepth);
-        if (depth < 0 || depth >= labelStack.Count)
+        private string ResolveBranchTarget(string labOrDepth)
+        {
+            if (AllDigits(labOrDepth))
+            {
+                int depth = int.Parse(labOrDepth);
+                if (depth < 0 || depth >= labelStack.Count)
+                    return functionExitLabel ?? (functionExitLabel = GenerateLabel("func_exit"));
+
+                var arr = labelStack.ToArray(); // top -> bottom
+                var ctx = arr[depth];
+
+                ctx.MarkEndUsed = true;
+
+                return ctx.IsLoop ? (ctx.StartLabel ?? ctx.EndLabel) : ctx.EndLabel;
+            }
+
+            var norm = NormalizeLabel(labOrDepth);
+            var hit = labelStack.FirstOrDefault(c => c.WatLabel == norm);
+            if (hit != null)
+                return hit.IsLoop ? (hit.StartLabel ?? hit.EndLabel) : hit.EndLabel;
+
             return functionExitLabel ?? (functionExitLabel = GenerateLabel("func_exit"));
-
-        var arr = labelStack.ToArray();          // top -> bottom
-        var ctx = arr[depth];
-
-        // NEW: on note que l'end de ce bloc peut être ciblé par profondeur
-        ctx.MarkEndUsed = true;
-
-        return ctx.IsLoop ? (ctx.StartLabel ?? ctx.EndLabel) : ctx.EndLabel;
-    }
-
-    var norm = NormalizeLabel(labOrDepth);
-    var hit = labelStack.FirstOrDefault(c => c.WatLabel == norm);
-    if (hit != null)
-        return hit.IsLoop ? (hit.StartLabel ?? hit.EndLabel) : hit.EndLabel;
-
-    return functionExitLabel ?? (functionExitLabel = GenerateLabel("func_exit"));
-}
+        }
 
         // ======== Entrée publique ========
 
@@ -125,11 +186,32 @@ private string ResolveBranchTarget(string labOrDepth)
         private void AddPrelude(BoogieProgram program)
         {
             // Globals
-            program.Declarations.Add(new BoogieGlobalVariable(new BoogieTypedIdent("$stack", new BoogieMapType(BoogieType.Int, BoogieType.Real))));
-            program.Declarations.Add(new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)));
-            program.Declarations.Add(new BoogieGlobalVariable(new BoogieTypedIdent("$tmp1", BoogieType.Real)));
-            program.Declarations.Add(new BoogieGlobalVariable(new BoogieTypedIdent("$tmp2", BoogieType.Real)));
-            program.Declarations.Add(new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", BoogieType.Real)));
+            program.Declarations.Add(
+                new BoogieGlobalVariable(
+                    new BoogieTypedIdent(
+                        "$stack",
+                        new BoogieMapType(BoogieType.Int, BoogieType.Real)
+                    )
+                )
+            );
+            program.Declarations.Add(
+                new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int))
+            );
+            program.Declarations.Add(
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp1", BoogieType.Real))
+            );
+            program.Declarations.Add(
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp2", BoogieType.Real))
+            );
+            program.Declarations.Add(
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", BoogieType.Real))
+            );
+
+            // nd_real (uninterpreted)
+            {
+                var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
+                program.Declarations.Add(new BoogieFunction("nd_real", new(), new() { res }));
+            }
 
             // bool_to_real
             {
@@ -139,25 +221,102 @@ private string ResolveBranchTarget(string labOrDepth)
                     new BoogieLiteralExpr(new Pfloat(1)),
                     new BoogieLiteralExpr(new Pfloat(0))
                 );
-                program.Declarations.Add(new BoogieFunctionDef("bool_to_real", new() { b }, BoogieType.Real, body));
+                program.Declarations.Add(
+                    new BoogieFunctionDef("bool_to_real", new() { b }, BoogieType.Real, body)
+                );
             }
 
             // real_to_bool
             {
                 var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
                 var body = new BoogieITE(
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, new BoogieIdentifierExpr("r"), new BoogieLiteralExpr(new Pfloat(0))),
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.EQ,
+                        new BoogieIdentifierExpr("r"),
+                        new BoogieLiteralExpr(new Pfloat(0))
+                    ),
                     new BoogieLiteralExpr(false),
                     new BoogieLiteralExpr(true)
                 );
-                program.Declarations.Add(new BoogieFunctionDef("real_to_bool", new() { r }, BoogieType.Bool, body));
+                program.Declarations.Add(
+                    new BoogieFunctionDef("real_to_bool", new() { r }, BoogieType.Bool, body)
+                );
             }
 
             // real_to_int : uninterpreted cast
             {
                 var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
                 var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int));
-                program.Declarations.Add(new BoogieFunction("real_to_int", new() { r }, new() { res }));
+                program.Declarations.Add(
+                    new BoogieFunction("real_to_int", new() { r }, new() { res })
+                );
+            }
+
+            {
+                var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                var body = new BoogieITE(
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.LT,
+                        new BoogieIdentifierExpr("r"),
+                        new BoogieLiteralExpr(new Pfloat(0))
+                    ),
+                    new BoogieUnaryOperation(
+                        BoogieUnaryOperation.Opcode.NEG,
+                        new BoogieIdentifierExpr("r")
+                    ),
+                    new BoogieIdentifierExpr("r")
+                );
+                program.Declarations.Add(
+                    new BoogieFunctionDef("abs_real", new() { r }, BoogieType.Real, body)
+                );
+            }
+
+            // min_real
+            {
+                var x = new BoogieFormalParam(new BoogieTypedIdent("x", BoogieType.Real));
+                var y = new BoogieFormalParam(new BoogieTypedIdent("y", BoogieType.Real));
+
+                var body = new BoogieITE(
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.LE,
+                        new BoogieIdentifierExpr("x"),
+                        new BoogieIdentifierExpr("y")
+                    ),
+                    new BoogieIdentifierExpr("x"),
+                    new BoogieIdentifierExpr("y")
+                );
+
+                program.Declarations.Add(
+                    new BoogieFunctionDef("min_real", new() { x, y }, BoogieType.Real, body)
+                );
+            }
+
+            // max_real
+            {
+                var x = new BoogieFormalParam(new BoogieTypedIdent("x", BoogieType.Real));
+                var y = new BoogieFormalParam(new BoogieTypedIdent("y", BoogieType.Real));
+
+                var body = new BoogieITE(
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.GE,
+                        new BoogieIdentifierExpr("x"),
+                        new BoogieIdentifierExpr("y")
+                    ),
+                    new BoogieIdentifierExpr("x"),
+                    new BoogieIdentifierExpr("y")
+                );
+
+                program.Declarations.Add(
+                    new BoogieFunctionDef("max_real", new() { x, y }, BoogieType.Real, body)
+                );
+            }
+            // sqrt_real : uninterpreted (good for verification abstraction)
+            {
+                var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
+                program.Declarations.Add(
+                    new BoogieFunction("sqrt_real", new() { r }, new() { res })
+                );
             }
 
             // push(val)
@@ -170,22 +329,46 @@ private string ResolveBranchTarget(string labOrDepth)
                     new()
                     {
                         new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
-                        new BoogieGlobalVariable(new BoogieTypedIdent("$stack", new BoogieMapType(BoogieType.Int, BoogieType.Real)))
+                        new BoogieGlobalVariable(
+                            new BoogieTypedIdent(
+                                "$stack",
+                                new BoogieMapType(BoogieType.Int, BoogieType.Real)
+                            )
+                        ),
                     },
-                    new(), new());
+                    new(),
+                    new()
+                );
                 program.Declarations.Add(proc);
 
                 var body = new BoogieStmtList();
-                body.AddStatement(new BoogieAssignCmd(
-                    new BoogieMapSelect(new BoogieIdentifierExpr("$stack"), new BoogieIdentifierExpr("$sp")),
-                    new BoogieIdentifierExpr("val")));
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieMapSelect(
+                            new BoogieIdentifierExpr("$stack"),
+                            new BoogieIdentifierExpr("$sp")
+                        ),
+                        new BoogieIdentifierExpr("val")
+                    )
+                );
                 var oldSp = new BoogieIdentifierExpr("$sp");
-                body.AddStatement(new BoogieAssignCmd(oldSp,
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.ADD, oldSp, new BoogieLiteralExpr(1))));
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        oldSp,
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.ADD,
+                            oldSp,
+                            new BoogieLiteralExpr(1)
+                        )
+                    )
+                );
                 var impl = new BoogieImplementation(
                     "push",
                     new() { new BoogieFormalParam(new BoogieTypedIdent("val", BoogieType.Real)) },
-                    new(), new(), body);
+                    new(),
+                    new(),
+                    body
+                );
                 program.Declarations.Add(impl);
             }
 
@@ -196,16 +379,37 @@ private string ResolveBranchTarget(string labOrDepth)
 
             // pop() (drop 1)
             {
-                var proc = new BoogieProcedure("pop", new(), new(), new(),
+                var proc = new BoogieProcedure(
+                    "pop",
+                    new(),
+                    new(),
+                    new(),
                     new() { new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)) },
-                    new(), new());
+                    new(),
+                    new()
+                );
                 program.Declarations.Add(proc);
 
                 var body = new BoogieStmtList();
-                body.AddStatement(new BoogieAssumeCmd(
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GT, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(0))));
-                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$sp"),
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.SUB, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(1))));
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.GT,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(0)
+                        )
+                    )
+                );
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(1)
+                        )
+                    )
+                );
                 var impl = new BoogieImplementation("pop", new(), new(), new(), body);
                 program.Declarations.Add(impl);
             }
@@ -213,23 +417,56 @@ private string ResolveBranchTarget(string labOrDepth)
             // local helper
             void AddPopToTmp(string name, string tmp)
             {
-                var proc = new BoogieProcedure(name, new(), new(), new(),
+                var proc = new BoogieProcedure(
+                    name,
+                    new(),
+                    new(),
+                    new(),
                     new()
                     {
                         new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
-                        new BoogieGlobalVariable(new BoogieTypedIdent("$stack", new BoogieMapType(BoogieType.Int, BoogieType.Real))),
-                        new BoogieGlobalVariable(new BoogieTypedIdent(tmp, BoogieType.Real))
+                        new BoogieGlobalVariable(
+                            new BoogieTypedIdent(
+                                "$stack",
+                                new BoogieMapType(BoogieType.Int, BoogieType.Real)
+                            )
+                        ),
+                        new BoogieGlobalVariable(new BoogieTypedIdent(tmp, BoogieType.Real)),
                     },
-                    new(), new());
+                    new(),
+                    new()
+                );
                 program.Declarations.Add(proc);
 
                 var body = new BoogieStmtList();
-                body.AddStatement(new BoogieAssumeCmd(new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GT,
-                    new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(0))));
-                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$sp"),
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.SUB, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(1))));
-                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr(tmp),
-                    new BoogieMapSelect(new BoogieIdentifierExpr("$stack"), new BoogieIdentifierExpr("$sp"))));
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.GT,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(0)
+                        )
+                    )
+                );
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(1)
+                        )
+                    )
+                );
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr(tmp),
+                        new BoogieMapSelect(
+                            new BoogieIdentifierExpr("$stack"),
+                            new BoogieIdentifierExpr("$sp")
+                        )
+                    )
+                );
 
                 var impl = new BoogieImplementation(name, new(), new(), new(), body);
                 program.Declarations.Add(impl);
@@ -239,7 +476,8 @@ private string ResolveBranchTarget(string labOrDepth)
         // popArgsN (inline, retourne a1..aN) — callee pops args
         private void EnsurePopArgsProc(int n)
         {
-            if (n <= 0 || program == null || popArgsMade.Contains(n)) return;
+            if (n <= 0 || program == null || popArgsMade.Contains(n))
+                return;
             popArgsMade.Add(n);
 
             var outs = new List<BoogieVariable>();
@@ -248,28 +486,100 @@ private string ResolveBranchTarget(string labOrDepth)
 
             var proc = new BoogieProcedure(
                 $"popArgs{n}",
-                new(), outs,
+                new(),
+                outs,
                 new() { new BoogieAttribute("inline", true) },
                 new()
                 {
                     new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$stack", new BoogieMapType(BoogieType.Int, BoogieType.Real)))
+                    new BoogieGlobalVariable(
+                        new BoogieTypedIdent(
+                            "$stack",
+                            new BoogieMapType(BoogieType.Int, BoogieType.Real)
+                        )
+                    ),
                 },
-                new(), new());
+                new(),
+                new()
+            );
             program!.Declarations.Add(proc);
 
             var body = new BoogieStmtList();
-            body.AddStatement(new BoogieAssumeCmd(
-                new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GE, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(n))
-            ));
+            body.AddStatement(
+                new BoogieAssumeCmd(
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.GE,
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieLiteralExpr(n)
+                    )
+                )
+            );
             for (int i = n; i >= 1; i--)
             {
-                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$sp"),
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.SUB, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(1))));
-                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr($"a{i}"),
-                    new BoogieMapSelect(new BoogieIdentifierExpr("$stack"), new BoogieIdentifierExpr("$sp"))));
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(1)
+                        )
+                    )
+                );
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr($"a{i}"),
+                        new BoogieMapSelect(
+                            new BoogieIdentifierExpr("$stack"),
+                            new BoogieIdentifierExpr("$sp")
+                        )
+                    )
+                );
             }
             var impl = new BoogieImplementation($"popArgs{n}", new(), outs, new(), body);
+            program!.Declarations.Add(impl);
+        }
+
+        // NEW: popDiscardN (inline, just decreases $sp)
+        private void EnsurePopDiscardProc(int n)
+        {
+            if (n <= 0 || program == null || popDiscardMade.Contains(n))
+                return;
+            popDiscardMade.Add(n);
+
+            var proc = new BoogieProcedure(
+                $"popDiscard{n}",
+                new(),
+                new(),
+                new() { new BoogieAttribute("inline", true) },
+                new() { new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)) },
+                new(),
+                new()
+            );
+            program!.Declarations.Add(proc);
+
+            var body = new BoogieStmtList();
+            body.AddStatement(
+                new BoogieAssumeCmd(
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.GE,
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieLiteralExpr(n)
+                    )
+                )
+            );
+            body.AddStatement(
+                new BoogieAssignCmd(
+                    new BoogieIdentifierExpr("$sp"),
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.SUB,
+                        new BoogieIdentifierExpr("$sp"),
+                        new BoogieLiteralExpr(n)
+                    )
+                )
+            );
+
+            var impl = new BoogieImplementation($"popDiscard{n}", new(), new(), new(), body);
             program!.Declarations.Add(impl);
         }
 
@@ -277,8 +587,8 @@ private string ResolveBranchTarget(string labOrDepth)
 
         private (BoogieProcedure, BoogieImplementation) TranslateFunction(WasmFunction func)
         {
-            var inParams = new List<BoogieVariable>();   // (pile)
-            var outParams = new List<BoogieVariable>();  // (pile)
+            var inParams = new List<BoogieVariable>(); // (pile)
+            var outParams = new List<BoogieVariable>(); // (pile)
             var locals = new List<BoogieVariable>();
             var body = new BoogieStmtList();
 
@@ -286,6 +596,9 @@ private string ResolveBranchTarget(string labOrDepth)
             currentFunction = func;
             functionExitLabel = null;
             PrecomputeLabelNeeds(func);
+
+            // NEW: track globals modified by this function
+            currentModifiedGlobals = new HashSet<string>(StringComparer.Ordinal);
 
             // Construire la table arg/loc
             int n = func.ParamCount;
@@ -311,24 +624,54 @@ private string ResolveBranchTarget(string labOrDepth)
             currentLocalMap = indexToId;
 
             // Prologue
-            body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("entry_sp"), new BoogieIdentifierExpr("$sp")));
-            body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$tmp1"), new BoogieLiteralExpr(new Pfloat(0))));
-            body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$tmp2"), new BoogieLiteralExpr(new Pfloat(0))));
-            body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("$tmp3"), new BoogieLiteralExpr(new Pfloat(0))));
+            body.AddStatement(
+                new BoogieAssignCmd(
+                    new BoogieIdentifierExpr("entry_sp"),
+                    new BoogieIdentifierExpr("$sp")
+                )
+            );
+            body.AddStatement(
+                new BoogieAssignCmd(
+                    new BoogieIdentifierExpr("$tmp1"),
+                    new BoogieLiteralExpr(new Pfloat(0))
+                )
+            );
+            body.AddStatement(
+                new BoogieAssignCmd(
+                    new BoogieIdentifierExpr("$tmp2"),
+                    new BoogieLiteralExpr(new Pfloat(0))
+                )
+            );
+            body.AddStatement(
+                new BoogieAssignCmd(
+                    new BoogieIdentifierExpr("$tmp3"),
+                    new BoogieLiteralExpr(new Pfloat(0))
+                )
+            );
 
             // Args : callee pop ses args
             if (n > 0)
             {
                 EnsurePopArgsProc(n);
-                body.AddStatement(new BoogieAssumeCmd(
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GE, new BoogieIdentifierExpr("$sp"), new BoogieLiteralExpr(n))
-                ));
-                body.AddStatement(new BoogieCallCmd($"popArgs{n}", new(), indexToId.Take(n).ToList()));
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.GE,
+                            new BoogieIdentifierExpr("$sp"),
+                            new BoogieLiteralExpr(n)
+                        )
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd($"popArgs{n}", new(), indexToId.Take(n).ToList())
+                );
             }
 
             // Locals init 0
             for (int i = n; i < n + m; i++)
-                body.AddStatement(new BoogieAssignCmd(indexToId[i], new BoogieLiteralExpr(new Pfloat(0))));
+                body.AddStatement(
+                    new BoogieAssignCmd(indexToId[i], new BoogieLiteralExpr(new Pfloat(0)))
+                );
 
             // Corps
             foreach (var node in func.Body)
@@ -345,15 +688,24 @@ private string ResolveBranchTarget(string labOrDepth)
             var expected = new BoogieBinaryOperation(
                 BoogieBinaryOperation.Opcode.ADD,
                 new BoogieIdentifierExpr("entry_sp"),
-                new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.SUB,
+                new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.SUB,
                     new BoogieLiteralExpr(r),
-                    new BoogieLiteralExpr(n))
+                    new BoogieLiteralExpr(n)
+                )
             );
 
             if (EnableFooterStackAssert)
             {
-                body.AddStatement(new BoogieAssertCmd(
-                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, new BoogieIdentifierExpr("$sp"), expected)));
+                body.AddStatement(
+                    new BoogieAssertCmd(
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.EQ,
+                            new BoogieIdentifierExpr("$sp"),
+                            expected
+                        )
+                    )
+                );
             }
             else
             {
@@ -362,19 +714,36 @@ private string ResolveBranchTarget(string labOrDepth)
 
             string funcName = SanitizeFunctionName(func.Name, contractName);
 
+            // Build modifies list dynamically (includes globals written by global.set)
+            var mods = new List<BoogieGlobalVariable>
+            {
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp1", BoogieType.Real)),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp2", BoogieType.Real)),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", BoogieType.Real)),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
+                new BoogieGlobalVariable(
+                    new BoogieTypedIdent(
+                        "$stack",
+                        new BoogieMapType(BoogieType.Int, BoogieType.Real)
+                    )
+                ),
+            };
+
+            if (currentModifiedGlobals != null)
+            {
+                foreach (var g in currentModifiedGlobals)
+                    mods.Add(new BoogieGlobalVariable(new BoogieTypedIdent(g, BoogieType.Real)));
+            }
+
             var proc = new BoogieProcedure(
                 funcName,
-                inParams, outParams,
+                inParams,
+                outParams,
+                new(),
+                mods,
                 new(),
                 new()
-                {
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$tmp1", BoogieType.Real)),
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$tmp2", BoogieType.Real)),
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", BoogieType.Real)),
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
-                    new BoogieGlobalVariable(new BoogieTypedIdent("$stack", new BoogieMapType(BoogieType.Int, BoogieType.Real)))
-                },
-                new(), new());
+            );
 
             var impl = new BoogieImplementation(proc.Name, inParams, outParams, locals, body);
 
@@ -384,6 +753,7 @@ private string ResolveBranchTarget(string labOrDepth)
             neededLoopStartLabels = null;
             neededBlockEndLabels = null;
             labelStack.Clear();
+            currentModifiedGlobals = null;
 
             return (proc, impl);
         }
@@ -393,7 +763,7 @@ private string ResolveBranchTarget(string labOrDepth)
         private void PrecomputeLabelNeeds(WasmFunction func)
         {
             neededLoopStartLabels = new HashSet<string>(StringComparer.Ordinal);
-            neededBlockEndLabels  = new HashSet<string>(StringComparer.Ordinal);
+            neededBlockEndLabels = new HashSet<string>(StringComparer.Ordinal);
             var scope = new Stack<(string label, bool isLoop)>();
 
             void Walk(WasmNode n)
@@ -401,79 +771,102 @@ private string ResolveBranchTarget(string labOrDepth)
                 switch (n)
                 {
                     case BlockNode blk:
-                        {
-                            bool hasUser = !string.IsNullOrEmpty(blk.Label) && blk.Label!.StartsWith("$", StringComparison.Ordinal);
-                            if (hasUser) scope.Push((blk.Label!.Substring(1), false));
-                            foreach (var m in blk.Body) Walk(m);
-                            if (hasUser) scope.Pop();
-                            break;
-                        }
+                    {
+                        bool hasUser =
+                            !string.IsNullOrEmpty(blk.Label)
+                            && blk.Label!.StartsWith("$", StringComparison.Ordinal);
+                        if (hasUser)
+                            scope.Push((blk.Label!.Substring(1), false));
+                        foreach (var m in blk.Body)
+                            Walk(m);
+                        if (hasUser)
+                            scope.Pop();
+                        break;
+                    }
                     case LoopNode lp:
-                        {
-                            bool hasUser = !string.IsNullOrEmpty(lp.Label) && lp.Label!.StartsWith("$", StringComparison.Ordinal);
-                            if (hasUser) scope.Push((lp.Label!.Substring(1), true));
-                            foreach (var m in lp.Body) Walk(m);
-                            if (hasUser) scope.Pop();
-                            break;
-                        }
+                    {
+                        bool hasUser =
+                            !string.IsNullOrEmpty(lp.Label)
+                            && lp.Label!.StartsWith("$", StringComparison.Ordinal);
+                        if (hasUser)
+                            scope.Push((lp.Label!.Substring(1), true));
+                        foreach (var m in lp.Body)
+                            Walk(m);
+                        if (hasUser)
+                            scope.Pop();
+                        break;
+                    }
                     case IfNode iff:
-                        {
-                            Walk(iff.Condition);
-                            foreach (var m in iff.ThenBody) Walk(m);
-                            if (iff.ElseBody != null) foreach (var m in iff.ElseBody) Walk(m);
-                            break;
-                        }
+                    {
+                        Walk(iff.Condition);
+                        foreach (var m in iff.ThenBody)
+                            Walk(m);
+                        if (iff.ElseBody != null)
+                            foreach (var m in iff.ElseBody)
+                                Walk(m);
+                        break;
+                    }
                     case BinaryOpNode b:
-                        Walk(b.Left); Walk(b.Right);
+                        Walk(b.Left);
+                        Walk(b.Right);
                         break;
                     case UnaryOpNode u:
-                        if (u.Operand != null) Walk(u.Operand);
+                        if (u.Operand != null)
+                            Walk(u.Operand);
                         break;
                     case BrNode br:
+                    {
+                        var target = NormalizeLabel(br.Label);
+                        foreach (var (lab, isLoop) in scope)
                         {
-                            var target = NormalizeLabel(br.Label);
-                            foreach (var (lab, isLoop) in scope)
+                            if (lab == target)
                             {
-                                if (lab == target)
-                                {
-                                    if (isLoop) neededLoopStartLabels!.Add(lab);
-                                    else neededBlockEndLabels!.Add(lab);
-                                    break;
-                                }
+                                if (isLoop)
+                                    neededLoopStartLabels!.Add(lab);
+                                else
+                                    neededBlockEndLabels!.Add(lab);
+                                break;
                             }
-                            break;
                         }
+                        break;
+                    }
                     case BrIfNode bri:
+                    {
+                        Walk(bri.Condition);
+                        var target = NormalizeLabel(bri.Label);
+                        foreach (var (lab, isLoop) in scope)
                         {
-                            Walk(bri.Condition);
-                            var target = NormalizeLabel(bri.Label);
-                            foreach (var (lab, isLoop) in scope)
+                            if (lab == target)
                             {
-                                if (lab == target)
-                                {
-                                    if (isLoop) neededLoopStartLabels!.Add(lab);
-                                    else neededBlockEndLabels!.Add(lab);
-                                    break;
-                                }
+                                if (isLoop)
+                                    neededLoopStartLabels!.Add(lab);
+                                else
+                                    neededBlockEndLabels!.Add(lab);
+                                break;
                             }
-                            break;
                         }
+                        break;
+                    }
                 }
             }
 
-            foreach (var n in func.Body) Walk(n);
+            foreach (var n in func.Body)
+                Walk(n);
         }
 
         // ======== Traduction des nœuds ========
 
         private int ResolveLocalIndex(int? index, string? name)
         {
-            if (index.HasValue) return index.Value;
+            if (index.HasValue)
+                return index.Value;
 
             if (!string.IsNullOrEmpty(name))
             {
-                if (currentFunction != null &&
-                    currentFunction.LocalIndexByName.TryGetValue(name, out var idx))
+                if (
+                    currentFunction != null
+                    && currentFunction.LocalIndexByName.TryGetValue(name, out var idx)
+                )
                     return idx;
 
                 if (name[0] == '$' && int.TryParse(name.AsSpan(1), out var autoIdx))
@@ -483,21 +876,37 @@ private string ResolveBranchTarget(string labOrDepth)
             throw new NotSupportedException($"Unknown local index/name: {name ?? "<null>"}");
         }
 
+        // Placeholder for later: type-driven results for call_indirect
+        private int ResolveIndirectResultCount(string? typeUse) => 0;
+
         private void TranslateNode(WasmNode node, BoogieStmtList body)
         {
             switch (node)
             {
                 case ConstNode cn:
                 {
-                    if (double.TryParse(cn.Value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var dv))
+                    if (
+                        double.TryParse(
+                            cn.Value,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var dv
+                        )
+                    )
                     {
-                        body.AddStatement(new BoogieCallCmd("push",
-                            new() { new BoogieLiteralExpr(new Pfloat((float)dv)) }, new()));
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new() { new BoogieLiteralExpr(new Pfloat((float)dv)) },
+                                new()
+                            )
+                        );
                     }
                     else
                     {
-                        body.AddStatement(new BoogieCommentCmd($"// unsupported const value: {cn.Value}"));
+                        body.AddStatement(
+                            new BoogieCommentCmd($"// unsupported const value: {cn.Value}")
+                        );
                     }
                     break;
                 }
@@ -514,7 +923,8 @@ private string ResolveBranchTarget(string labOrDepth)
                 {
                     int idx = ResolveLocalIndex(ls.Index, ls.Name);
                     var id = currentLocalMap![idx];
-                    if (ls.Value != null) TranslateNode(ls.Value, body);
+                    if (ls.Value != null)
+                        TranslateNode(ls.Value, body);
                     EnsurePopArgsProc(1);
                     body.AddStatement(new BoogieCallCmd("popArgs1", new(), new() { id }));
                     break;
@@ -530,18 +940,121 @@ private string ResolveBranchTarget(string labOrDepth)
                     break;
                 }
 
+                // ===== NEW: global.get / global.set =====
+                case GlobalGetNode gg:
+                {
+                    string gkey = ResolveGlobalKey(gg.Index, gg.Name);
+                    string bname = EnsureGlobalVar(gkey);
+                    body.AddStatement(
+                        new BoogieCallCmd("push", new() { new BoogieIdentifierExpr(bname) }, new())
+                    );
+                    break;
+                }
+
+                case GlobalSetNode gs:
+                {
+                    string gkey = ResolveGlobalKey(gs.Index, gs.Name);
+                    string bname = EnsureGlobalVar(gkey);
+
+                    // folded form: (global.set $g <expr>)
+                    if (gs.Value != null)
+                        TranslateNode(gs.Value, body);
+
+                    EnsurePopArgsProc(1);
+                    body.AddStatement(
+                        new BoogieCallCmd(
+                            "popArgs1",
+                            new(),
+                            new() { new BoogieIdentifierExpr(bname) }
+                        )
+                    );
+
+                    // IMPORTANT: Boogie framing (modifies)
+                    currentModifiedGlobals?.Add(bname);
+                    break;
+                }
+
                 case CallNode call:
                 {
                     if (call.Args != null)
-                        foreach (var a in call.Args) TranslateNode(a, body);
+                        foreach (var a in call.Args)
+                            TranslateNode(a, body);
                     string target = MapCalleeName(call.Target);
                     body.AddStatement(new BoogieCallCmd(target, new(), new()));
                     break;
                 }
 
+                // ===== call_indirect (conservative model) =====
+                case CallIndirectNode ci:
+                {
+                    foreach (var a in ci.Args)
+                        TranslateNode(a, body);
+                    TranslateNode(ci.CalleeIndex, body);
+
+                    int nArgs = ci.Args.Count;
+                    EnsurePopDiscardProc(nArgs + 1); // args + idx
+                    body.AddStatement(new BoogieCallCmd($"popDiscard{nArgs + 1}", new(), new()));
+
+                    int r = ResolveIndirectResultCount(ci.TypeUse);
+                    for (int i = 0; i < r; i++)
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new() { new BoogieFunctionCall("nd_real", new()) },
+                                new()
+                            )
+                        );
+
+                    break;
+                }
+
+                // ===== return_call (tail-call) =====
+                case ReturnCallNode rc:
+                {
+                    if (rc.Args != null)
+                        foreach (var a in rc.Args)
+                            TranslateNode(a, body);
+
+                    string target = MapCalleeName(rc.Target);
+                    body.AddStatement(new BoogieCallCmd(target, new(), new()));
+
+                    if (functionExitLabel == null)
+                        functionExitLabel = GenerateLabel("func_exit");
+                    body.AddStatement(new BoogieGotoCmd(functionExitLabel));
+                    break;
+                }
+
+                // ===== return_call_indirect (tail-call indirect) =====
+                case ReturnCallIndirectNode rci:
+                {
+                    foreach (var a in rci.Args)
+                        TranslateNode(a, body);
+                    TranslateNode(rci.CalleeIndex, body);
+
+                    int nArgs = rci.Args.Count;
+                    EnsurePopDiscardProc(nArgs + 1);
+                    body.AddStatement(new BoogieCallCmd($"popDiscard{nArgs + 1}", new(), new()));
+
+                    int r = ResolveIndirectResultCount(rci.TypeUse);
+                    for (int i = 0; i < r; i++)
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new() { new BoogieFunctionCall("nd_real", new()) },
+                                new()
+                            )
+                        );
+
+                    if (functionExitLabel == null)
+                        functionExitLabel = GenerateLabel("func_exit");
+                    body.AddStatement(new BoogieGotoCmd(functionExitLabel));
+                    break;
+                }
+
                 case UnaryOpNode un:
                 {
-                    if (un.Operand != null) TranslateNode(un.Operand, body);
+                    if (un.Operand != null)
+                        TranslateNode(un.Operand, body);
 
                     if (un.Op == "drop")
                     {
@@ -550,21 +1063,63 @@ private string ResolveBranchTarget(string labOrDepth)
                     else if (un.Op == "i32.eqz" || un.Op == "i64.eqz")
                     {
                         body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
-                        var eqzExpr = new BoogieFunctionCall("bool_to_real", new()
-                        {
-                            new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ,
-                                new BoogieIdentifierExpr("$tmp1"),
-                                new BoogieLiteralExpr(new Pfloat(0)))
-                        });
+                        var eqzExpr = new BoogieFunctionCall(
+                            "bool_to_real",
+                            new()
+                            {
+                                new BoogieBinaryOperation(
+                                    BoogieBinaryOperation.Opcode.EQ,
+                                    new BoogieIdentifierExpr("$tmp1"),
+                                    new BoogieLiteralExpr(new Pfloat(0))
+                                ),
+                            }
+                        );
                         body.AddStatement(new BoogieCallCmd("push", new() { eqzExpr }, new()));
                     }
                     else if (un.Op == "i32.wrap_i64" || un.Op == "i64.wrap_i64")
                     {
-                        body.AddStatement(new BoogieCommentCmd("// wrap: no-op under real semantics"));
+                        body.AddStatement(
+                            new BoogieCommentCmd("// wrap: no-op under real semantics")
+                        );
+                    }
+                    else if (un.Op == "f32.abs" || un.Op == "f64.abs")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+
+                        var absExpr = new BoogieFunctionCall(
+                            "abs_real",
+                            new() { new BoogieIdentifierExpr("$tmp1") }
+                        );
+
+                        body.AddStatement(new BoogieCallCmd("push", new() { absExpr }, new()));
+                    }
+                    else if (un.Op == "f32.neg" || un.Op == "f64.neg")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+
+                        var negExpr = new BoogieUnaryOperation(
+                            BoogieUnaryOperation.Opcode.NEG,
+                            new BoogieIdentifierExpr("$tmp1")
+                        );
+
+                        body.AddStatement(new BoogieCallCmd("push", new() { negExpr }, new()));
+                    }
+                    else if (un.Op == "f32.sqrt" || un.Op == "f64.sqrt")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+
+                        var sqrtExpr = new BoogieFunctionCall(
+                            "sqrt_real",
+                            new() { new BoogieIdentifierExpr("$tmp1") }
+                        );
+
+                        body.AddStatement(new BoogieCallCmd("push", new() { sqrtExpr }, new()));
                     }
                     else
                     {
-                        body.AddStatement(new BoogieCommentCmd($"// unsupported unary op: {un.Op}"));
+                        body.AddStatement(
+                            new BoogieCommentCmd($"// unsupported unary op: {un.Op}")
+                        );
                     }
                     break;
                 }
@@ -579,75 +1134,243 @@ private string ResolveBranchTarget(string labOrDepth)
                     var tmp1 = new BoogieIdentifierExpr("$tmp1");
                     var tmp2 = new BoogieIdentifierExpr("$tmp2");
 
-                    if (bn.Op is "i32.add" or "i64.add" or "f32.add" or "f64.add"
-                        or "i32.sub" or "i64.sub" or "f32.sub" or "f64.sub"
-                        or "i32.mul" or "i64.mul" or "f32.mul" or "f64.mul"
-                        or "i32.div_s" or "i64.div_s" or "f32.div" or "f64.div"
-                        or "i32.div_u" or "i64.div_u")
+                    if (
+                        bn.Op
+                        is "i32.add"
+                            or "i64.add"
+                            or "f32.add"
+                            or "f64.add"
+                            or "i32.sub"
+                            or "i64.sub"
+                            or "f32.sub"
+                            or "f64.sub"
+                            or "i32.mul"
+                            or "i64.mul"
+                            or "f32.mul"
+                            or "f64.mul"
+                            or "i32.div_s"
+                            or "i64.div_s"
+                            or "f32.div"
+                            or "f64.div"
+                            or "i32.div_u"
+                            or "i64.div_u"
+                    )
                     {
                         var opKind = bn.Op switch
                         {
-                            "i32.add" or "i64.add" or "f32.add" or "f64.add" => BoogieBinaryOperation.Opcode.ADD,
-                            "i32.sub" or "i64.sub" or "f32.sub" or "f64.sub" => BoogieBinaryOperation.Opcode.SUB,
-                            "i32.mul" or "i64.mul" or "f32.mul" or "f64.mul" => BoogieBinaryOperation.Opcode.MUL,
-                            _ => BoogieBinaryOperation.Opcode.DIV
+                            "i32.add" or "i64.add" or "f32.add" or "f64.add" =>
+                                BoogieBinaryOperation.Opcode.ADD,
+                            "i32.sub" or "i64.sub" or "f32.sub" or "f64.sub" =>
+                                BoogieBinaryOperation.Opcode.SUB,
+                            "i32.mul" or "i64.mul" or "f32.mul" or "f64.mul" =>
+                                BoogieBinaryOperation.Opcode.MUL,
+                            _ => BoogieBinaryOperation.Opcode.DIV,
                         };
                         var arithExpr = new BoogieBinaryOperation(opKind, tmp2, tmp1);
                         body.AddStatement(new BoogieCallCmd("push", new() { arithExpr }, new()));
                     }
-                    else if (bn.Op is
-                        "i32.eq" or "i64.eq" or "f32.eq" or "f64.eq" or
-                        "i32.ne" or "i64.ne" or "f32.ne" or "f64.ne" or
-                        "i32.lt_s" or "i64.lt_s" or "i32.lt_u" or "i64.lt_u" or "f32.lt" or "f64.lt" or
-                        "i32.le_s" or "i64.le_s" or "i32.le_u" or "i64.le_u" or "f32.le" or "f64.le" or
-                        "i32.gt_s" or "i64.gt_s" or "i32.gt_u" or "i64.gt_u" or "f32.gt" or "f64.gt" or
-                        "i32.ge_s" or "i64.ge_s" or "i32.ge_u" or "i64.ge_u" or "f32.ge" or "f64.ge")
+                    else if (
+                        bn.Op
+                        is "i32.eq"
+                            or "i64.eq"
+                            or "f32.eq"
+                            or "f64.eq"
+                            or "i32.ne"
+                            or "i64.ne"
+                            or "f32.ne"
+                            or "f64.ne"
+                            or "i32.lt_s"
+                            or "i64.lt_s"
+                            or "i32.lt_u"
+                            or "i64.lt_u"
+                            or "f32.lt"
+                            or "f64.lt"
+                            or "i32.le_s"
+                            or "i64.le_s"
+                            or "i32.le_u"
+                            or "i64.le_u"
+                            or "f32.le"
+                            or "f64.le"
+                            or "i32.gt_s"
+                            or "i64.gt_s"
+                            or "i32.gt_u"
+                            or "i64.gt_u"
+                            or "f32.gt"
+                            or "f64.gt"
+                            or "i32.ge_s"
+                            or "i64.ge_s"
+                            or "i32.ge_u"
+                            or "i64.ge_u"
+                            or "f32.ge"
+                            or "f64.ge"
+                    )
                     {
                         BoogieExpr cmpExpr = bn.Op switch
                         {
-                            "i32.eq" or "i64.eq" or "f32.eq" or "f64.eq"
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, tmp2, tmp1) }),
-                            "i32.ne" or "i64.ne" or "f32.ne" or "f64.ne"
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.NEQ, tmp2, tmp1) }),
-                            "i32.lt_s" or "i64.lt_s" or "i32.lt_u" or "i64.lt_u" or "f32.lt" or "f64.lt"
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.LT, tmp2, tmp1) }),
-                            "i32.le_s" or "i64.le_s" or "i32.le_u" or "i64.le_u" or "f32.le" or "f64.le"
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.LE, tmp2, tmp1) }),
-                            "i32.gt_s" or "i64.gt_s" or "i32.gt_u" or "i64.gt_u" or "f32.gt" or "f64.gt"
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GT, tmp2, tmp1) }),
+                            "i32.eq" or "i64.eq" or "f32.eq" or "f64.eq" => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.EQ,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
+                            "i32.ne" or "i64.ne" or "f32.ne" or "f64.ne" => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.NEQ,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
+                            "i32.lt_s"
+                            or "i64.lt_s"
+                            or "i32.lt_u"
+                            or "i64.lt_u"
+                            or "f32.lt"
+                            or "f64.lt" => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.LT,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
+                            "i32.le_s"
+                            or "i64.le_s"
+                            or "i32.le_u"
+                            or "i64.le_u"
+                            or "f32.le"
+                            or "f64.le" => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.LE,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
+                            "i32.gt_s"
+                            or "i64.gt_s"
+                            or "i32.gt_u"
+                            or "i64.gt_u"
+                            or "f32.gt"
+                            or "f64.gt" => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.GT,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
                             _ // ge
-                                => new BoogieFunctionCall("bool_to_real", new() { new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GE, tmp2, tmp1) }),
+                            => new BoogieFunctionCall(
+                                "bool_to_real",
+                                new()
+                                {
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.GE,
+                                        tmp2,
+                                        tmp1
+                                    ),
+                                }
+                            ),
                         };
                         body.AddStatement(new BoogieCallCmd("push", new() { cmpExpr }, new()));
                     }
+                    else if (bn.Op == "f32.min" || bn.Op == "f64.min")
+                    {
+                        // operands already evaluated
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // y
+                        body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // x
+
+                        var minExpr = new BoogieFunctionCall(
+                            "min_real",
+                            new()
+                            {
+                                new BoogieIdentifierExpr("$tmp2"),
+                                new BoogieIdentifierExpr("$tmp1"),
+                            }
+                        );
+
+                        body.AddStatement(new BoogieCallCmd("push", new() { minExpr }, new()));
+                    }
+                    else if (bn.Op == "f32.max" || bn.Op == "f64.max")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // y
+                        body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // x
+
+                        var maxExpr = new BoogieFunctionCall(
+                            "max_real",
+                            new()
+                            {
+                                new BoogieIdentifierExpr("$tmp2"),
+                                new BoogieIdentifierExpr("$tmp1"),
+                            }
+                        );
+
+                        body.AddStatement(new BoogieCallCmd("push", new() { maxExpr }, new()));
+                    }
                     else
                     {
-                        body.AddStatement(new BoogieCommentCmd($"// unsupported binary op: {bn.Op}"));
+                        body.AddStatement(
+                            new BoogieCommentCmd($"// unsupported binary op: {bn.Op}")
+                        );
                     }
                     break;
                 }
 
                 case BlockNode blk:
                 {
-                        if (blk.Label == "module" || blk.Label == "func" || blk.Label == "type")
-    {
-        foreach (var child in blk.Body)
-            TranslateNode(child, body);
-        break;
-    }
-                    // Toujours matérialiser l'EndLabel d'un block (cible de "break"/br depth sur block)
-                    string? wat = blk.Label != null && blk.Label.StartsWith("$") ? blk.Label.Substring(1) : null;
+                    // Ignore module wrapper and type blocks (not executable). Still traverse func blocks.
+                    if (blk.Label == "module")
+                    {
+                        foreach (var child in blk.Body)
+                            TranslateNode(child, body);
+                        break;
+                    }
+                    if (blk.Label == "type")
+                    {
+                        // not executable: ignore completely
+                        break;
+                    }
+                    if (blk.Label == "func")
+                    {
+                        foreach (var child in blk.Body)
+                            TranslateNode(child, body);
+                        break;
+                    }
+
+                    string? wat =
+                        blk.Label != null && blk.Label.StartsWith("$")
+                            ? blk.Label.Substring(1)
+                            : null;
 
                     var ctx = new LabelContext
                     {
                         WatLabel = wat,
                         IsLoop = false,
                         StartLabel = null,
-                        EndLabel = GenerateLabel(wat != null ? $"{wat}_end" : "block_end")
+                        EndLabel = GenerateLabel(wat != null ? $"{wat}_end" : "block_end"),
                     };
                     labelStack.Push(ctx);
 
-                    foreach (var child in blk.Body) TranslateNode(child, body);
+                    foreach (var child in blk.Body)
+                        TranslateNode(child, body);
 
                     body.AddStatement(new BoogieSkipCmd(ctx.EndLabel + ":"));
                     labelStack.Pop();
@@ -656,21 +1379,24 @@ private string ResolveBranchTarget(string labOrDepth)
 
                 case LoopNode loop:
                 {
-                    // Toujours matérialiser StartLabel (continue) ET EndLabel (break)
-                    string? wat = loop.Label != null && loop.Label.StartsWith("$") ? loop.Label.Substring(1) : null;
+                    string? wat =
+                        loop.Label != null && loop.Label.StartsWith("$")
+                            ? loop.Label.Substring(1)
+                            : null;
 
                     var ctx = new LabelContext
                     {
                         WatLabel = wat,
                         IsLoop = true,
                         StartLabel = GenerateLabel(wat != null ? $"{wat}_start" : "loop_start"),
-                        EndLabel   = GenerateLabel(wat != null ? $"{wat}_end"   : "loop_end")
+                        EndLabel = GenerateLabel(wat != null ? $"{wat}_end" : "loop_end"),
                     };
                     labelStack.Push(ctx);
 
-                    body.AddStatement(new BoogieSkipCmd(ctx.StartLabel + ":")); // cible "continue"
-                    foreach (var child in loop.Body) TranslateNode(child, body);
-                    body.AddStatement(new BoogieSkipCmd(ctx.EndLabel + ":"));   // cible "break"
+                    body.AddStatement(new BoogieSkipCmd(ctx.StartLabel + ":")); // continue
+                    foreach (var child in loop.Body)
+                        TranslateNode(child, body);
+                    body.AddStatement(new BoogieSkipCmd(ctx.EndLabel + ":")); // break
 
                     labelStack.Pop();
                     break;
@@ -690,28 +1416,42 @@ private string ResolveBranchTarget(string labOrDepth)
                     var target = ResolveBranchTarget(brIf.Label);
                     var thenBlk = new BoogieStmtList();
                     thenBlk.AddStatement(new BoogieGotoCmd(target));
-                    var cond = new BoogieFunctionCall("real_to_bool", new() { new BoogieIdentifierExpr("$tmp1") });
+                    var cond = new BoogieFunctionCall(
+                        "real_to_bool",
+                        new() { new BoogieIdentifierExpr("$tmp1") }
+                    );
                     body.AddStatement(new BoogieIfCmd(cond, thenBlk, null));
                     break;
                 }
 
                 case BrTableNode bt:
                 {
-                    // idx := int(pop)
                     body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
-                    body.AddStatement(new BoogieAssignCmd(
-                        new BoogieIdentifierExpr("idx"),
-                        new BoogieFunctionCall("real_to_int", new() { new BoogieIdentifierExpr("$tmp1") })
-                    ));
+                    body.AddStatement(
+                        new BoogieAssignCmd(
+                            new BoogieIdentifierExpr("idx"),
+                            new BoogieFunctionCall(
+                                "real_to_int",
+                                new() { new BoogieIdentifierExpr("$tmp1") }
+                            )
+                        )
+                    );
 
                     int k = bt.Targets.Count;
                     var idx = new BoogieIdentifierExpr("idx");
 
-                    // Si idx hors bornes -> default
                     var outCond = new BoogieBinaryOperation(
                         BoogieBinaryOperation.Opcode.OR,
-                        new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.LT, idx, new BoogieLiteralExpr(0)),
-                        new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GE, idx, new BoogieLiteralExpr(k))
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.LT,
+                            idx,
+                            new BoogieLiteralExpr(0)
+                        ),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.GE,
+                            idx,
+                            new BoogieLiteralExpr(k)
+                        )
                     );
                     var outBlk = new BoogieStmtList();
                     outBlk.AddStatement(new BoogieGotoCmd(ResolveBranchTarget(bt.Default)));
@@ -719,12 +1459,15 @@ private string ResolveBranchTarget(string labOrDepth)
                     var inBlk = new BoogieStmtList();
                     for (int i = 0; i < k; i++)
                     {
-                        var condEq = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, idx, new BoogieLiteralExpr(i));
+                        var condEq = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.EQ,
+                            idx,
+                            new BoogieLiteralExpr(i)
+                        );
                         var thenBlk = new BoogieStmtList();
                         thenBlk.AddStatement(new BoogieGotoCmd(ResolveBranchTarget(bt.Targets[i])));
                         inBlk.AddStatement(new BoogieIfCmd(condEq, thenBlk, null));
                     }
-                    // garde : si aucune case ne match, saute au default
                     inBlk.AddStatement(new BoogieGotoCmd(ResolveBranchTarget(bt.Default)));
 
                     body.AddStatement(new BoogieIfCmd(outCond, outBlk, inBlk));
@@ -733,7 +1476,6 @@ private string ResolveBranchTarget(string labOrDepth)
 
                 case UnreachableNode:
                 {
-                    // coupe l’exploration au lieu d'exiger une preuve d’inatteignabilité
                     body.AddStatement(new BoogieAssumeCmd(new BoogieLiteralExpr(false)));
                     break;
                 }
@@ -748,13 +1490,28 @@ private string ResolveBranchTarget(string labOrDepth)
                     body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new()));
                     body.AddStatement(new BoogieCallCmd("popToTmp3", new(), new()));
 
-                    var cond = new BoogieFunctionCall("real_to_bool", new() { new BoogieIdentifierExpr("$tmp1") });
+                    var cond = new BoogieFunctionCall(
+                        "real_to_bool",
+                        new() { new BoogieIdentifierExpr("$tmp1") }
+                    );
 
                     var thenBlk = new BoogieStmtList();
-                    thenBlk.AddStatement(new BoogieCallCmd("push", new() { new BoogieIdentifierExpr("$tmp3") }, new()));
+                    thenBlk.AddStatement(
+                        new BoogieCallCmd(
+                            "push",
+                            new() { new BoogieIdentifierExpr("$tmp3") },
+                            new()
+                        )
+                    );
 
                     var elseBlk = new BoogieStmtList();
-                    elseBlk.AddStatement(new BoogieCallCmd("push", new() { new BoogieIdentifierExpr("$tmp2") }, new()));
+                    elseBlk.AddStatement(
+                        new BoogieCallCmd(
+                            "push",
+                            new() { new BoogieIdentifierExpr("$tmp2") },
+                            new()
+                        )
+                    );
 
                     body.AddStatement(new BoogieIfCmd(cond, thenBlk, elseBlk));
                     break;
@@ -766,23 +1523,29 @@ private string ResolveBranchTarget(string labOrDepth)
                     body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
 
                     var thenBlock = new BoogieStmtList();
-                    foreach (var stmt in ifn.ThenBody) TranslateNode(stmt, thenBlock);
+                    foreach (var stmt in ifn.ThenBody)
+                        TranslateNode(stmt, thenBlock);
 
                     BoogieStmtList? elseBlock = null;
                     if (ifn.ElseBody != null)
                     {
                         elseBlock = new BoogieStmtList();
-                        foreach (var stmt in ifn.ElseBody) TranslateNode(stmt, elseBlock);
+                        foreach (var stmt in ifn.ElseBody)
+                            TranslateNode(stmt, elseBlock);
                     }
 
-                    var cond = new BoogieFunctionCall("real_to_bool", new() { new BoogieIdentifierExpr("$tmp1") });
+                    var cond = new BoogieFunctionCall(
+                        "real_to_bool",
+                        new() { new BoogieIdentifierExpr("$tmp1") }
+                    );
                     body.AddStatement(new BoogieIfCmd(cond, thenBlock, elseBlock));
                     break;
                 }
 
                 case ReturnNode:
                 {
-                    if (functionExitLabel == null) functionExitLabel = GenerateLabel("func_exit");
+                    if (functionExitLabel == null)
+                        functionExitLabel = GenerateLabel("func_exit");
                     body.AddStatement(new BoogieGotoCmd(functionExitLabel));
                     break;
                 }
@@ -796,13 +1559,30 @@ private string ResolveBranchTarget(string labOrDepth)
                 case RawInstructionNode raw:
                 {
                     var s = raw.Instruction;
-                    if (s.StartsWith("$") || s.Contains("=>") || s == "module" || s == "type" || s == "func")
+
+                    // ignore noise from parsing non-executable syntax
+                    if (
+                        s.StartsWith("$", StringComparison.Ordinal)
+                        || s.Contains("=>", StringComparison.Ordinal)
+                        || s
+                            is "module"
+                                or "type"
+                                or "func"
+                                or "param"
+                                or "result"
+                                or "mut"
+                                or "global"
+                                or "table"
+                                or "elem"
+                    )
                     {
                         // ignore
                     }
                     else
                     {
-                        body.AddStatement(new BoogieCommentCmd($"// unhandled raw instruction: {s}"));
+                        body.AddStatement(
+                            new BoogieCommentCmd($"// unhandled raw instruction: {s}")
+                        );
                     }
                     break;
                 }

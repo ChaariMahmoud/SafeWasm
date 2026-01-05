@@ -78,6 +78,41 @@ namespace WasmToBoogie.Parser.Ast
         public List<WasmNode> Args { get; set; } = new();  // e.g., $compute or function index
     }
 
+    public class CallIndirectNode : WasmNode
+{
+    public string? TypeUse { get; set; }      // e.g. "0" or "$t0" if present
+    public WasmNode CalleeIndex { get; set; } // expression producing the table index
+    public List<WasmNode> Args { get; set; } = new();
+}
+
+public class ReturnCallNode : WasmNode
+{
+    public string Target { get; set; }
+    public List<WasmNode> Args { get; set; } = new();
+}
+
+public class ReturnCallIndirectNode : WasmNode
+{
+    public string? TypeUse { get; set; }
+    public WasmNode CalleeIndex { get; set; }
+    public List<WasmNode> Args { get; set; } = new();
+}
+
+public class GlobalGetNode : WasmNode
+{
+    public int? Index { get; set; }
+    public string? Name { get; set; }   // e.g., $g
+}
+
+public class GlobalSetNode : WasmNode
+{
+    public int? Index { get; set; }
+    public string? Name { get; set; }   // e.g., $g
+    public WasmNode? Value { get; set; } // folded form: (global.set $g (i32.const 5))
+}
+
+
+
     public class RawInstructionNode : WasmNode
     {
         public string Instruction { get; set; }
