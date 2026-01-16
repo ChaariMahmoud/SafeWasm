@@ -127,8 +127,8 @@ and scalable reasoning framework for WebAssembly using Boogie and modern SMT/BMC
 
 ### Build from Source
 ```bash
-git clone https://github.com/ChaariMahmoud/VeriWasm.git
-cd VeriWasm/Sources
+git clone https://github.com/ChaariMahmoud/SafeWasm.git
+cd SafeWasm/Sources
 dotnet build
 ```
 
