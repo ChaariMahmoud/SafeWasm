@@ -1150,6 +1150,49 @@ namespace WasmToBoogie.Parser
                         Cond = cond,
                     };
                 }
+                else if (IsMemoryOp(op))
+                {
+                    // 1) parse immediates offset/align
+                    ParseOffsetAlign(tokens, ref index, out int offset, out int align);
+
+                    // 2) formes possibles :
+                    // - stack form: (i32.load offset=.. align=..)  -> Address=null, Value=null
+                    // - folded load: (i32.load (i32.const ...))   -> Address=expr
+                    // - folded store: (i32.store (addr) (val))    -> Address + Value
+
+                    WasmNode? addr = null;
+                    WasmNode? val = null;
+
+                    if (index < tokens.Count && tokens[index] != ")")
+                    {
+                        // On peut avoir 1 ou 2 sous-expressions, ou des atomes (rare)
+                        // On parse les sous-expressions tant qu'on n'est pas à ')'
+                        var exprs = new List<WasmNode>();
+                        while (index < tokens.Count && tokens[index] != ")")
+                        {
+                            if (tokens[index] == "(")
+                                exprs.Add(ParseNode(tokens, ref index));
+                            else
+                                break; // atome inattendu -> on laisse au generic/Raw si besoin
+                        }
+
+                        if (exprs.Count >= 1)
+                            addr = exprs[0];
+                        if (exprs.Count >= 2)
+                            val = exprs[1];
+                    }
+
+                    ExpectToken(tokens, ref index, ")");
+
+                    return new MemoryOpNode
+                    {
+                        Op = op,
+                        Offset = offset,
+                        Align = align,
+                        Address = addr,
+                        Value = val,
+                    };
+                }
                 else
                 {
                     // Generic: skip atoms until ')', recurse only on nested lists
@@ -1186,13 +1229,77 @@ namespace WasmToBoogie.Parser
             }
         }
 
+        private static bool IsMemoryOp(string op)
+        {
+            // loads
+            if (
+                op.EndsWith(".load")
+                || op.Contains(".load8_")
+                || op.Contains(".load16_")
+                || op.Contains(".load32_")
+            )
+                return true;
+
+            // stores (pour plus tard, mais on le détecte déjà)
+            if (
+                op.EndsWith(".store")
+                || op.Contains(".store8")
+                || op.Contains(".store16")
+                || op.Contains(".store32")
+            )
+                return true;
+
+            // memory.* (pour plus tard)
+            if (op == "memory.size" || op == "memory.grow")
+                return true;
+
+            return false;
+        }
+
+        private static void ParseOffsetAlign(
+            List<string> tokens,
+            ref int index,
+            out int offset,
+            out int align
+        )
+        {
+            offset = 0;
+            align = 0;
+
+            // Les immediates arrivent comme des atomes: "offset=16", "align=4"
+            while (index < tokens.Count)
+            {
+                string t = tokens[index];
+                if (t == ")" || t == "(")
+                    break;
+
+                if (t.StartsWith("offset=", StringComparison.Ordinal))
+                {
+                    int.TryParse(t.AsSpan("offset=".Length), out offset);
+                    index++;
+                    continue;
+                }
+                if (t.StartsWith("align=", StringComparison.Ordinal))
+                {
+                    int.TryParse(t.AsSpan("align=".Length), out align);
+                    index++;
+                    continue;
+                }
+
+                // dès qu’on voit autre chose, on s’arrête (ça peut être une expr)
+                break;
+            }
+        }
+
         private bool IsUnaryOp(string op) =>
             op == "drop"
             || op.EndsWith(".eqz")
             || op.EndsWith(".wrap_i64")
             || op.EndsWith(".abs")
             || op.EndsWith(".neg")
-            || op.EndsWith(".sqrt");
+            || op.EndsWith(".sqrt")
+            || op.EndsWith(".nearest")
+            || op.EndsWith(".floor");
 
         private bool IsBinaryOp(string op) =>
             op.EndsWith(".add")

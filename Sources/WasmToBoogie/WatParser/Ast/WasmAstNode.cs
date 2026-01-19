@@ -6,19 +6,19 @@ namespace WasmToBoogie.Parser.Ast
 
     public class ConstNode : WasmNode
     {
-        public string Type { get; set; }  // e.g., i32
+        public string Type { get; set; } // e.g., i32
         public string Value { get; set; } // e.g., 5
     }
 
     public class UnaryOpNode : WasmNode
     {
-        public string Op { get; set; }     // e.g., drop, i32.eqz
+        public string Op { get; set; } // e.g., drop, i32.eqz
         public WasmNode Operand { get; set; }
     }
 
     public class BinaryOpNode : WasmNode
     {
-        public string Op { get; set; }      // e.g., i32.add, i32.lt_s
+        public string Op { get; set; } // e.g., i32.add, i32.lt_s
         public WasmNode Left { get; set; }
         public WasmNode Right { get; set; }
     }
@@ -44,19 +44,19 @@ namespace WasmToBoogie.Parser.Ast
 
     public class BrNode : WasmNode
     {
-        public string Label { get; set; }  // e.g., $label
+        public string Label { get; set; } // e.g., $label
     }
 
     public class BrIfNode : WasmNode
     {
-        public string Label { get; set; }  // e.g., $label
+        public string Label { get; set; } // e.g., $label
         public WasmNode Condition { get; set; }
     }
 
     public class LocalGetNode : WasmNode
     {
         public int? Index { get; set; }
-        public string? Name { get; set; }  // if used like (local.get $a)
+        public string? Name { get; set; } // if used like (local.get $a)
     }
 
     public class LocalSetNode : WasmNode
@@ -75,43 +75,41 @@ namespace WasmToBoogie.Parser.Ast
     public class CallNode : WasmNode
     {
         public string Target { get; set; }
-        public List<WasmNode> Args { get; set; } = new();  // e.g., $compute or function index
+        public List<WasmNode> Args { get; set; } = new(); // e.g., $compute or function index
     }
 
     public class CallIndirectNode : WasmNode
-{
-    public string? TypeUse { get; set; }      // e.g. "0" or "$t0" if present
-    public WasmNode CalleeIndex { get; set; } // expression producing the table index
-    public List<WasmNode> Args { get; set; } = new();
-}
+    {
+        public string? TypeUse { get; set; } // e.g. "0" or "$t0" if present
+        public WasmNode CalleeIndex { get; set; } // expression producing the table index
+        public List<WasmNode> Args { get; set; } = new();
+    }
 
-public class ReturnCallNode : WasmNode
-{
-    public string Target { get; set; }
-    public List<WasmNode> Args { get; set; } = new();
-}
+    public class ReturnCallNode : WasmNode
+    {
+        public string Target { get; set; }
+        public List<WasmNode> Args { get; set; } = new();
+    }
 
-public class ReturnCallIndirectNode : WasmNode
-{
-    public string? TypeUse { get; set; }
-    public WasmNode CalleeIndex { get; set; }
-    public List<WasmNode> Args { get; set; } = new();
-}
+    public class ReturnCallIndirectNode : WasmNode
+    {
+        public string? TypeUse { get; set; }
+        public WasmNode CalleeIndex { get; set; }
+        public List<WasmNode> Args { get; set; } = new();
+    }
 
-public class GlobalGetNode : WasmNode
-{
-    public int? Index { get; set; }
-    public string? Name { get; set; }   // e.g., $g
-}
+    public class GlobalGetNode : WasmNode
+    {
+        public int? Index { get; set; }
+        public string? Name { get; set; } // e.g., $g
+    }
 
-public class GlobalSetNode : WasmNode
-{
-    public int? Index { get; set; }
-    public string? Name { get; set; }   // e.g., $g
-    public WasmNode? Value { get; set; } // folded form: (global.set $g (i32.const 5))
-}
-
-
+    public class GlobalSetNode : WasmNode
+    {
+        public int? Index { get; set; }
+        public string? Name { get; set; } // e.g., $g
+        public WasmNode? Value { get; set; } // folded form: (global.set $g (i32.const 5))
+    }
 
     public class RawInstructionNode : WasmNode
     {
@@ -122,11 +120,10 @@ public class GlobalSetNode : WasmNode
 
     public class SelectNode : WasmNode
     {
-        public WasmNode V1 { get; set; }   // first value
-        public WasmNode V2 { get; set; }   // second value
+        public WasmNode V1 { get; set; } // first value
+        public WasmNode V2 { get; set; } // second value
         public WasmNode Cond { get; set; } // condition (nonzero = true)
     }
-
 
     public class WasmFunction
     {
@@ -136,7 +133,7 @@ public class GlobalSetNode : WasmNode
         // new: signature info (filled by parser)
         public int ParamCount { get; set; } = 0;
         public int LocalCount { get; set; } = 0;
-        public int ResultCount { get; set; } 
+        public int ResultCount { get; set; }
         public Dictionary<string, int> LocalIndexByName { get; set; } = new(); // params first [0..n-1], then locals
     }
 
@@ -146,10 +143,22 @@ public class GlobalSetNode : WasmNode
     }
 
     public class ReturnNode : WasmNode { }
-public class NopNode : WasmNode { }
-public class BrTableNode : WasmNode {
-    public List<string> Targets { get; set; } = new(); 
-    public string Default { get; set; } = "";          
-}
 
+    public class NopNode : WasmNode { }
+
+    public class BrTableNode : WasmNode
+    {
+        public List<string> Targets { get; set; } = new();
+        public string Default { get; set; } = "";
+    }
+
+    public class MemoryOpNode : WasmNode
+    {
+        public string Op { get; set; } // "i32.load", "i32.store8", ...
+        public int Offset { get; set; } = 0; // from "offset=..."
+        public int Align { get; set; } = 0; // from "align=..."
+        public WasmNode? Address { get; set; } // folded form: (i32.load (i32.const ...))
+        public WasmNode? Value { get; set; } // folded store form: (i32.store (addr) (val))
+        public int MemoryIndex { get; set; } = 0;
+    }
 }

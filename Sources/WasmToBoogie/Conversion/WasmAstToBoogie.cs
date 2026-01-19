@@ -181,6 +181,683 @@ namespace WasmToBoogie.Conversion
             return program;
         }
 
+        private void AddMemoryReadProcedures(BoogieProgram program)
+        {
+            // Helper: make common ins/outs
+            static List<BoogieVariable> InsA() =>
+                new() { new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int)) };
+
+            static List<BoogieVariable> OutsResultInt() =>
+                new() { new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int)) };
+
+            // ------------------------------------------------------------
+            // mem_read_u8(a) : int   (0..255)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_u8",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(), // modifies list (empty)
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var body = new BoogieStmtList();
+
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieMapSelect(
+                            new BoogieIdentifierExpr("$mem"),
+                            new BoogieIdentifierExpr("a")
+                        )
+                    )
+                );
+
+                // assume 0 <= result < 256
+                var ge0 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    new BoogieLiteralExpr(0),
+                    new BoogieIdentifierExpr("result")
+                );
+                var lt256 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LT,
+                    new BoogieIdentifierExpr("result"),
+                    new BoogieLiteralExpr(256)
+                );
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.AND, ge0, lt256)
+                    )
+                );
+
+                var impl = new BoogieImplementation("mem_read_u8", ins, outs, new(), body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_s8(a) : int   (-128..127)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_s8",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(), // no modifies
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("u", BoogieType.Int)),
+                };
+
+                var body = new BoogieStmtList();
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("u") }
+                    )
+                );
+
+                var cond = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.GE,
+                    new BoogieIdentifierExpr("u"),
+                    new BoogieLiteralExpr(128)
+                );
+
+                var thenBlk = new BoogieStmtList();
+                thenBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("u"),
+                            new BoogieLiteralExpr(256)
+                        )
+                    )
+                );
+
+                var elseBlk = new BoogieStmtList();
+                elseBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieIdentifierExpr("u")
+                    )
+                );
+
+                body.AddStatement(new BoogieIfCmd(cond, thenBlk, elseBlk));
+
+                var impl = new BoogieImplementation("mem_read_s8", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_u16(a) : int  (0..65535) little-endian
+            // result = u8(a) + 256*u8(a+1)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_u16",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("b0", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b1", BoogieType.Int)),
+                };
+
+                var body = new BoogieStmtList();
+
+                // b0 := u8(a)
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("b0") }
+                    )
+                );
+
+                // b1 := u8(a+1)
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new()
+                        {
+                            new BoogieBinaryOperation(
+                                BoogieBinaryOperation.Opcode.ADD,
+                                new BoogieIdentifierExpr("a"),
+                                new BoogieLiteralExpr(1)
+                            ),
+                        },
+                        new() { new BoogieIdentifierExpr("b1") }
+                    )
+                );
+
+                // result := b0 + 256*b1
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.ADD,
+                            new BoogieIdentifierExpr("b0"),
+                            new BoogieBinaryOperation(
+                                BoogieBinaryOperation.Opcode.MUL,
+                                new BoogieLiteralExpr(256),
+                                new BoogieIdentifierExpr("b1")
+                            )
+                        )
+                    )
+                );
+
+                // assume 0 <= result < 65536
+                var ge0 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    new BoogieLiteralExpr(0),
+                    new BoogieIdentifierExpr("result")
+                );
+                var lt = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LT,
+                    new BoogieIdentifierExpr("result"),
+                    new BoogieLiteralExpr(65536)
+                );
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.AND, ge0, lt)
+                    )
+                );
+
+                var impl = new BoogieImplementation("mem_read_u16", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_s16(a) : int (-32768..32767)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_s16",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("u", BoogieType.Int)),
+                };
+
+                var body = new BoogieStmtList();
+
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u16",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("u") }
+                    )
+                );
+
+                var cond = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.GE,
+                    new BoogieIdentifierExpr("u"),
+                    new BoogieLiteralExpr(32768)
+                );
+
+                var thenBlk = new BoogieStmtList();
+                thenBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("u"),
+                            new BoogieLiteralExpr(65536)
+                        )
+                    )
+                );
+
+                var elseBlk = new BoogieStmtList();
+                elseBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieIdentifierExpr("u")
+                    )
+                );
+
+                body.AddStatement(new BoogieIfCmd(cond, thenBlk, elseBlk));
+
+                var impl = new BoogieImplementation("mem_read_s16", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_u32(a) : int (0..2^32-1) little-endian
+            // result = sum_{i=0..3} 256^i * u8(a+i)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_u32",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("b0", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b1", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b2", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b3", BoogieType.Int)),
+                };
+
+                BoogieExpr APlus(int k) =>
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.ADD,
+                        new BoogieIdentifierExpr("a"),
+                        new BoogieLiteralExpr(k)
+                    );
+
+                var body = new BoogieStmtList();
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("b0") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(1) },
+                        new() { new BoogieIdentifierExpr("b1") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(2) },
+                        new() { new BoogieIdentifierExpr("b2") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(3) },
+                        new() { new BoogieIdentifierExpr("b3") }
+                    )
+                );
+
+                // result := b0 + 256*b1 + 65536*b2 + 16777216*b3
+                var expr = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.ADD,
+                    new BoogieIdentifierExpr("b0"),
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.ADD,
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.MUL,
+                            new BoogieLiteralExpr(256),
+                            new BoogieIdentifierExpr("b1")
+                        ),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.ADD,
+                            new BoogieBinaryOperation(
+                                BoogieBinaryOperation.Opcode.MUL,
+                                new BoogieLiteralExpr(65536),
+                                new BoogieIdentifierExpr("b2")
+                            ),
+                            new BoogieBinaryOperation(
+                                BoogieBinaryOperation.Opcode.MUL,
+                                new BoogieLiteralExpr(16777216),
+                                new BoogieIdentifierExpr("b3")
+                            )
+                        )
+                    )
+                );
+
+                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("result"), expr));
+
+                // assume 0 <= result < 2^32  (4294967296)
+                var ge0 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    new BoogieLiteralExpr(0),
+                    new BoogieIdentifierExpr("result")
+                );
+                var lt = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LT,
+                    new BoogieIdentifierExpr("result"),
+                    new BoogieLiteralExpr(4294967296L)
+                );
+                body.AddStatement(
+                    new BoogieAssumeCmd(
+                        new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.AND, ge0, lt)
+                    )
+                );
+
+                var impl = new BoogieImplementation("mem_read_u32", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_s32(a) : int (signed 32)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_s32",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("u", BoogieType.Int)),
+                };
+
+                var body = new BoogieStmtList();
+
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u32",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("u") }
+                    )
+                );
+
+                var cond = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.GE,
+                    new BoogieIdentifierExpr("u"),
+                    new BoogieLiteralExpr(2147483648L) // 2^31
+                );
+
+                var thenBlk = new BoogieStmtList();
+                thenBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.SUB,
+                            new BoogieIdentifierExpr("u"),
+                            new BoogieLiteralExpr(4294967296L) // 2^32
+                        )
+                    )
+                );
+
+                var elseBlk = new BoogieStmtList();
+                elseBlk.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieIdentifierExpr("u")
+                    )
+                );
+
+                body.AddStatement(new BoogieIfCmd(cond, thenBlk, elseBlk));
+
+                var impl = new BoogieImplementation("mem_read_s32", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_u64(a) : int  little-endian (abstractly as int)
+            // result = sum_{i=0..7} 256^i * u8(a+i)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_u64",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("b0", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b1", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b2", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b3", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b4", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b5", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b6", BoogieType.Int)),
+                    new BoogieLocalVariable(new BoogieTypedIdent("b7", BoogieType.Int)),
+                };
+
+                BoogieExpr APlus(int k) =>
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.ADD,
+                        new BoogieIdentifierExpr("a"),
+                        new BoogieLiteralExpr(k)
+                    );
+
+                var body = new BoogieStmtList();
+
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("b0") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(1) },
+                        new() { new BoogieIdentifierExpr("b1") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(2) },
+                        new() { new BoogieIdentifierExpr("b2") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(3) },
+                        new() { new BoogieIdentifierExpr("b3") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(4) },
+                        new() { new BoogieIdentifierExpr("b4") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(5) },
+                        new() { new BoogieIdentifierExpr("b5") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(6) },
+                        new() { new BoogieIdentifierExpr("b6") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u8",
+                        new() { APlus(7) },
+                        new() { new BoogieIdentifierExpr("b7") }
+                    )
+                );
+
+                // constants 256^k
+                var t1 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(256L),
+                    new BoogieIdentifierExpr("b1")
+                );
+                var t2 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(65536L),
+                    new BoogieIdentifierExpr("b2")
+                );
+                var t3 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(16777216L),
+                    new BoogieIdentifierExpr("b3")
+                );
+                var t4 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(4294967296L),
+                    new BoogieIdentifierExpr("b4")
+                );
+                var t5 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(1099511627776L),
+                    new BoogieIdentifierExpr("b5")
+                );
+                var t6 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(281474976710656L),
+                    new BoogieIdentifierExpr("b6")
+                );
+                var t7 = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.MUL,
+                    new BoogieLiteralExpr(72057594037927936L),
+                    new BoogieIdentifierExpr("b7")
+                );
+
+                var expr = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.ADD,
+                    new BoogieIdentifierExpr("b0"),
+                    new BoogieBinaryOperation(
+                        BoogieBinaryOperation.Opcode.ADD,
+                        t1,
+                        new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.ADD,
+                            t2,
+                            new BoogieBinaryOperation(
+                                BoogieBinaryOperation.Opcode.ADD,
+                                t3,
+                                new BoogieBinaryOperation(
+                                    BoogieBinaryOperation.Opcode.ADD,
+                                    t4,
+                                    new BoogieBinaryOperation(
+                                        BoogieBinaryOperation.Opcode.ADD,
+                                        t5,
+                                        new BoogieBinaryOperation(
+                                            BoogieBinaryOperation.Opcode.ADD,
+                                            t6,
+                                            t7
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+
+                body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("result"), expr));
+
+                // NOTE: on ne met pas de borne < 2^64 ici (trop grand/chiant en int), on laisse libre.
+
+                var impl = new BoogieImplementation("mem_read_u64", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+
+            // ------------------------------------------------------------
+            // mem_read_s64(a) : int  (on l'abstrait)
+            // ------------------------------------------------------------
+            {
+                var ins = InsA();
+                var outs = OutsResultInt();
+
+                var proc = new BoogieProcedure(
+                    "mem_read_s64",
+                    ins,
+                    outs,
+                    new() { new BoogieAttribute("inline", true) },
+                    new(),
+                    new(),
+                    new()
+                );
+                program.Declarations.Add(proc);
+
+                // abstraction: result := mem_read_u64(a)  OR any int
+                // Ici on choisit "any int" via une assignation non déterministe si tu as nd_int().
+                // Comme tu n'as pas nd_int dans ton prelude, on laisse "assume true" et pas d'impl intelligente.
+                // -> plus simple: impl = result := mem_read_u64(a); (ça donne un modèle non signé, mais OK pour démarrer)
+
+                var locals = new List<BoogieVariable>
+                {
+                    new BoogieLocalVariable(new BoogieTypedIdent("u", BoogieType.Int)),
+                };
+
+                var body = new BoogieStmtList();
+                body.AddStatement(
+                    new BoogieCallCmd(
+                        "mem_read_u64",
+                        new() { new BoogieIdentifierExpr("a") },
+                        new() { new BoogieIdentifierExpr("u") }
+                    )
+                );
+                body.AddStatement(
+                    new BoogieAssignCmd(
+                        new BoogieIdentifierExpr("result"),
+                        new BoogieIdentifierExpr("u")
+                    )
+                );
+
+                var impl = new BoogieImplementation("mem_read_s64", ins, outs, locals, body);
+                program.Declarations.Add(impl);
+            }
+        }
+
         // ======== Préambule Boogie (pile + helpers) ========
 
         private void AddPrelude(BoogieProgram program)
@@ -206,6 +883,20 @@ namespace WasmToBoogie.Conversion
             program.Declarations.Add(
                 new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", BoogieType.Real))
             );
+
+            // ===== Memory model (memory 0) =====
+            program.Declarations.Add(
+                new BoogieGlobalVariable(
+                    new BoogieTypedIdent(
+                        "$mem",
+                        new BoogieMapType(BoogieType.Int, BoogieType.Int) // byte-addressed: 0..255
+                    )
+                )
+            );
+            program.Declarations.Add(
+                new BoogieGlobalVariable(new BoogieTypedIdent("$mem_pages", BoogieType.Int)) // pages of 64KiB
+            );
+            AddMemoryReadProcedures(program);
 
             // nd_real (uninterpreted)
             {
@@ -252,25 +943,557 @@ namespace WasmToBoogie.Conversion
                 );
             }
 
+            // int_to_real : uninterpreted cast
             {
-                var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
-                var body = new BoogieITE(
-                    new BoogieBinaryOperation(
-                        BoogieBinaryOperation.Opcode.LT,
-                        new BoogieIdentifierExpr("r"),
-                        new BoogieLiteralExpr(new Pfloat(0))
-                    ),
-                    new BoogieUnaryOperation(
-                        BoogieUnaryOperation.Opcode.NEG,
-                        new BoogieIdentifierExpr("r")
-                    ),
-                    new BoogieIdentifierExpr("r")
-                );
+                var i = new BoogieFormalParam(new BoogieTypedIdent("i", BoogieType.Int));
+                var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
                 program.Declarations.Add(
-                    new BoogieFunctionDef("abs_real", new() { r }, BoogieType.Real, body)
+                    new BoogieFunction("int_to_real", new() { i }, new() { res })
                 );
             }
 
+            // Bitcast helpers for floats (abstract)
+            {
+                var i = new BoogieFormalParam(new BoogieTypedIdent("i", BoogieType.Int));
+                var r = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
+                program.Declarations.Add(
+                    new BoogieFunction("bits32_to_real", new() { i }, new() { r })
+                );
+                program.Declarations.Add(
+                    new BoogieFunction("bits64_to_real", new() { i }, new() { r })
+                );
+            }
+
+            // ===== Memory read helpers (little-endian) =====
+
+            /*           // mem_read_u8(a) : uninterpreted
+                       {
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunction("mem_read_u8", new() { a }, new() { res })
+                           );
+                       }
+           
+                       // axiom forall a:int :: mem_read_u8(a) == $mem[a]
+                       {
+                           var a = new BoogieIdentifierExpr("a");
+                           var lhs = new BoogieFunctionCall("mem_read_u8", new() { a });
+                           var rhs = new BoogieMapSelect(new BoogieIdentifierExpr("$mem"), a);
+                           var eq = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, lhs, rhs);
+           
+                           program.Declarations.Add(
+                               new BoogieAxiom(
+                                   new BoogieQuantifiedExpr(
+                                       isForall: true,
+                                       qvars: new() { a },
+                                       qvarTypes: new() { BoogieType.Int },
+                                       bodyExpr: eq
+                                   )
+                               )
+                           );
+                       }
+           
+                       // (optionnel mais conseillé) axiom forall a:int :: 0 <= mem_read_u8(a) && mem_read_u8(a) < 256
+                       {
+                           var a = new BoogieIdentifierExpr("a");
+                           var m = new BoogieFunctionCall("mem_read_u8", new() { a });
+                           var ge0 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.LE,
+                               new BoogieLiteralExpr(0),
+                               m
+                           );
+                           var lt256 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.LT,
+                               m,
+                               new BoogieLiteralExpr(256)
+                           );
+                           var body = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.AND, ge0, lt256);
+           
+                           program.Declarations.Add(
+                               new BoogieAxiom(
+                                   new BoogieQuantifiedExpr(
+                                       isForall: true,
+                                       qvars: new() { a },
+                                       qvarTypes: new() { BoogieType.Int },
+                                       bodyExpr: body
+                                   )
+                               )
+                           );
+                       }
+           
+                       // mem_read_s8(a)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           var u8 = new BoogieFunctionCall("mem_read_u8", new() { aId });
+           
+                           var cond = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.GE,
+                               u8,
+                               new BoogieLiteralExpr(128)
+                           );
+                           var thenE = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.SUB,
+                               u8,
+                               new BoogieLiteralExpr(256)
+                           );
+                           var elseE = u8;
+           
+                           var body = new BoogieITE(cond, thenE, elseE);
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_s8", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_u16(a) = u8(a) + 256*u8(a+1)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           BoogieExpr b0 = new BoogieFunctionCall("mem_read_u8", new() { aId });
+                           BoogieExpr b1 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(1)
+                                   ),
+                               }
+                           );
+           
+                           var body = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.ADD,
+                               b0,
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.MUL,
+                                   new BoogieLiteralExpr(256),
+                                   b1
+                               )
+                           );
+           
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_u16", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_s16(a)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           var u16 = new BoogieFunctionCall("mem_read_u16", new() { aId });
+           
+                           var cond = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.GE,
+                               u16,
+                               new BoogieLiteralExpr(32768)
+                           );
+                           var thenE = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.SUB,
+                               u16,
+                               new BoogieLiteralExpr(65536)
+                           );
+                           var elseE = u16;
+           
+                           var body = new BoogieITE(cond, thenE, elseE);
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_s16", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_u32(a) = sum_{i=0..3} 256^i * u8(a+i)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+           
+                           BoogieExpr b0 = new BoogieFunctionCall("mem_read_u8", new() { aId });
+                           BoogieExpr b1 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(1)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b2 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(2)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b3 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(3)
+                                   ),
+                               }
+                           );
+           
+                           BoogieExpr term1 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(256),
+                               b1
+                           );
+                           BoogieExpr term2 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(65536),
+                               b2
+                           );
+                           BoogieExpr term3 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(16777216),
+                               b3
+                           );
+           
+                           BoogieExpr body = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.ADD,
+                               b0,
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.ADD,
+                                   term1,
+                                   new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.ADD, term2, term3)
+                               )
+                           );
+           
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_u32", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_s32(a)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           var u32 = new BoogieFunctionCall("mem_read_u32", new() { aId });
+           
+                           // 2^31
+                           var cond = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.GE,
+                               u32,
+                               new BoogieLiteralExpr(2147483648)
+                           );
+                           // u32 - 2^32
+                           var thenE = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.SUB,
+                               u32,
+                               new BoogieLiteralExpr(4294967296L)
+                           );
+                           var elseE = u32;
+           
+                           var body = new BoogieITE(cond, thenE, elseE);
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_s32", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_u64(a) = sum_{i=0..7} 256^i * u8(a+i)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+           
+                           BoogieExpr b0 = new BoogieFunctionCall("mem_read_u8", new() { aId });
+                           BoogieExpr b1 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(1)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b2 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(2)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b3 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(3)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b4 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(4)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b5 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(5)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b6 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(6)
+                                   ),
+                               }
+                           );
+                           BoogieExpr b7 = new BoogieFunctionCall(
+                               "mem_read_u8",
+                               new()
+                               {
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       aId,
+                                       new BoogieLiteralExpr(7)
+                                   ),
+                               }
+                           );
+           
+                           // constants: 256^k
+                           BoogieExpr t1 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(256),
+                               b1
+                           );
+                           BoogieExpr t2 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(65536),
+                               b2
+                           );
+                           BoogieExpr t3 = new BoogieBinaryOperation(
+                       
+                           // 256^4 = 4294967296
+                           BoogieExpr t4 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(4294967296L),
+                               b4
+                           );
+                           // 256^5 = 1099511627776
+                           BoogieExpr t5 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(1099511627776L),
+                               b5
+                           );
+                           // 256^6 = 281474976710656
+                           BoogieExpr t6 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(281474976710656L),
+                               b6
+                           );
+                           // 256^7 = 72057594037927936
+                           BoogieExpr t7 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(72057594037927936L),
+                               b7
+                           );
+           
+                           BoogieExpr body = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.ADD,
+                               b0,
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.ADD,
+                                   t1,
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       t2,
+                                       new BoogieBinaryOperation(
+                                           BoogieBinaryOperation.Opcode.ADD,
+                                           t3,
+                                           new BoogieBinaryOperation(
+                                               BoogieBinaryOperation.Opcode.ADD,
+                                               t4,
+                                               new BoogieBinaryOperation(
+                                                   BoogieBinaryOperation.Opcode.ADD,
+                                                   t5,
+                                                   new BoogieBinaryOperation(
+                                                       BoogieBinaryOperation.Opcode.ADD,
+                                                       t6,
+                                                       t7
+                                                   )
+           
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_u64", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_s64(a)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           var u64 = new BoogieFunctionCall("mem_read_u64", new() { aId });
+           
+                           // 2^63
+                           var cond = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.GE,
+                               u64,
+                               new BoogieLiteralExpr(9223372036854775808L)
+                           );
+           
+                           // u64 - 2^64 (this constant doesn't fit in signed long; use as string via Pfloat? not possible for int)
+                           // -> We'll model s64 conservatively using uninterpreted if your Boogie int literals are limited.
+                           // For now: declare mem_read_s64 as uninterpreted to avoid literal overflow.
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunction("mem_read_s64", new() { a }, new() { res })
+                           );
+                           var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                           var body = new BoogieITE(
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.LT,
+                                   new BoogieIdentifierExpr("r"),
+                                   new BoogieLiteralExpr(new Pfloat(0))
+                               ),
+                               new BoogieUnaryOperation(
+                                   BoogieUnaryOperation.Opcode.NEG,
+                                   new BoogieIdentifierExpr("r")
+                               ),
+                               new BoogieIdentifierExpr("r")
+                           );
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("abs_real", new() { r }, BoogieType.Real, body)
+                           );
+                       }
+                                                     )
+                                           )
+                                       )
+                                   )
+                               )
+                           );
+           BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(16777216),
+                               b3
+                           );
+           
+                           // 256^4 = 4294967296
+                           BoogieExpr t4 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(4294967296L),
+                               b4
+                           );
+                           // 256^5 = 1099511627776
+                           BoogieExpr t5 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(1099511627776L),
+                               b5
+                           );
+                           //  b6
+                           );
+                           // 256^7 = 72057594037927936
+                           BoogieExpr t7 = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.MUL,
+                               new BoogieLiteralExpr(72057594037927936L),
+                               b7
+                           );
+           
+                           BoogieExpr body = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.ADD,
+                               b0,
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.ADD,
+                                   t1,
+                                   new BoogieBinaryOperation(
+                                       BoogieBinaryOperation.Opcode.ADD,
+                                       t2,
+                                       new BoogieBinaryOperation(
+                                           BoogieBinaryOperation.Opcode.ADD,
+                                           t3,
+                                           new BoogieBinaryOperation(
+                                               BoogieBinaryOperation.Opcode.ADD,
+                                               t4,
+                                               new BoogieBinaryOperation(
+                                                   BoogieBinaryOperation.Opcode.ADD,
+                                                   t5,
+                                                   new BoogieBinaryOperation(
+                                                       BoogieBinaryOperation.Opcode.ADD,
+                                                       t6,
+                                                       t7
+                                                   )
+           
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("mem_read_u64", new() { a }, BoogieType.Int, body)
+                           );
+                       }
+           
+                       // mem_read_s64(a)
+                       {
+                           var aId = new BoogieIdentifierExpr("a");
+                           var u64 = new BoogieFunctionCall("mem_read_u64", new() { aId });
+           
+                           // 2^63
+                           var cond = new BoogieBinaryOperation(
+                               BoogieBinaryOperation.Opcode.GE,
+                               u64,
+                               new BoogieLiteralExpr(9223372036854775808L)
+                           );
+           
+                           // u64 - 2^64 (this constant doesn't fit in signed long; use as string via Pfloat? not possible for int)
+                           // -> We'll model s64 conservatively using uninterpreted if your Boogie int literals are limited.
+                           // For now: declare mem_read_s64 as uninterpreted to avoid literal overflow.
+                           var a = new BoogieFormalParam(new BoogieTypedIdent("a", BoogieType.Int));
+                           var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int));
+                           program.Declarations.Add(
+                               new BoogieFunction("mem_read_s64", new() { a }, new() { res })
+                           );
+                           var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                           var body = new BoogieITE(
+                               new BoogieBinaryOperation(
+                                   BoogieBinaryOperation.Opcode.LT,
+                                   new BoogieIdentifierExpr("r"),
+                                   new BoogieLiteralExpr(new Pfloat(0))
+                               ),
+                               new BoogieUnaryOperation(
+                                   BoogieUnaryOperation.Opcode.NEG,
+                                   new BoogieIdentifierExpr("r")
+                               ),
+                               new BoogieIdentifierExpr("r")
+                           );
+                           program.Declarations.Add(
+                               new BoogieFunctionDef("abs_real", new() { r }, BoogieType.Real, body)
+                           );
+                       }
+                                                      )
+                                           )
+                                       )
+                                   )
+                               )
+                           );*/
+                              
+   
             // min_real
             {
                 var x = new BoogieFormalParam(new BoogieTypedIdent("x", BoogieType.Real));
@@ -306,16 +1529,206 @@ namespace WasmToBoogie.Conversion
                     new BoogieIdentifierExpr("y")
                 );
 
-                program.Declarations.Add(
-                    new BoogieFunctionDef("max_real", new() { x, y }, BoogieType.Real, body)
-                );
+                // sqrt_real : uninterpreted + axioms
+                {
+                    // Declare uninterpreted function sqrt_real(r: real) returns (result: real);
+                    var rParam = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                    var resParam = new BoogieFormalParam(
+                        new BoogieTypedIdent("result", BoogieType.Real)
+                    );
+                    program.Declarations.Add(
+                        new BoogieFunction("sqrt_real", new() { rParam }, new() { resParam })
+                    );
+
+                    // Build bound variable r: real
+                    var r = new BoogieIdentifierExpr("r");
+                    var rType = BoogieType.Real;
+
+                    // 0.0
+                    var zero = new BoogieLiteralExpr(new Pfloat(0));
+
+                    // Guard: r >= 0.0
+                    var guard = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.GE, r, zero);
+
+                    // sqrt_real(r)
+                    var sqrt_r = new BoogieFunctionCall("sqrt_real", new List<BoogieExpr> { r });
+
+                    // Axiom 1: forall r: real :: r >= 0.0 ==> sqrt_real(r) >= 0.0
+                    {
+                        var rhs = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.GE,
+                            sqrt_r,
+                            zero
+                        );
+                        var imp = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.IMP,
+                            guard,
+                            rhs
+                        );
+
+                        var forall = new BoogieQuantifiedExpr(
+                            isForall: true,
+                            qvars: new List<BoogieIdentifierExpr> { r },
+                            qvarTypes: new List<BoogieType> { rType },
+                            bodyExpr: imp,
+                            trigger: new List<BoogieExpr> { sqrt_r } // optional trigger (helps SMT sometimes)
+                        );
+
+                        program.Declarations.Add(new BoogieAxiom(forall));
+                    }
+
+                    // Axiom 2: forall r: real :: r >= 0.0 ==> sqrt_real(r) * sqrt_real(r) == r
+                    {
+                        var mul = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.MUL,
+                            sqrt_r,
+                            sqrt_r
+                        );
+                        var eq = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, mul, r);
+                        var imp = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.IMP,
+                            guard,
+                            eq
+                        );
+
+                        var forall = new BoogieQuantifiedExpr(
+                            isForall: true,
+                            qvars: new List<BoogieIdentifierExpr> { r },
+                            qvarTypes: new List<BoogieType> { rType },
+                            bodyExpr: imp,
+                            trigger: new List<BoogieExpr> { sqrt_r } // optional trigger
+                        );
+
+                        program.Declarations.Add(new BoogieAxiom(forall));
+                    }
+                }
             }
-            // sqrt_real : uninterpreted (good for verification abstraction)
+
+            // nearest_real : uninterpreted rounding-to-nearest abstraction
+            {
+                var rIn = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
+                var rOut = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
+                program.Declarations.Add(
+                    new BoogieFunction("nearest_real", new() { rIn }, new() { rOut })
+                );
+
+                // Build: forall r: real :: (nearest_real(r) - 0.5 <= r) && (r <= nearest_real(r) + 0.5)
+                var r = new BoogieIdentifierExpr("r");
+                BoogieExpr nr = new BoogieFunctionCall("nearest_real", new() { r });
+                var half = new BoogieLiteralExpr(new Pfloat(0.5f));
+
+                var leftBound = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.SUB, nr, half),
+                    r
+                );
+
+                var rightBound = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    r,
+                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.ADD, nr, half)
+                );
+
+                var boundAxiomBody = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.AND,
+                    leftBound,
+                    rightBound
+                );
+
+                var boundAxiom = new BoogieAxiom(
+                    new BoogieQuantifiedExpr(
+                        isForall: true,
+                        qvars: new() { new BoogieIdentifierExpr("r") },
+                        qvarTypes: new() { BoogieType.Real },
+                        bodyExpr: boundAxiomBody,
+                        trigger: new List<BoogieExpr> { nr } // trigger {nearest_real(r)}
+                    )
+                );
+                program.Declarations.Add(boundAxiom);
+
+                // Build: forall r: real :: nearest_real(nearest_real(r)) == nearest_real(r)
+                var nnr = new BoogieFunctionCall("nearest_real", new() { (BoogieExpr)nr });
+
+                var idemBody = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, nnr, nr);
+
+                var idemAxiom = new BoogieAxiom(
+                    new BoogieQuantifiedExpr(
+                        isForall: true,
+                        qvars: new() { new BoogieIdentifierExpr("r") },
+                        qvarTypes: new() { BoogieType.Real },
+                        bodyExpr: idemBody,
+                        trigger: new List<BoogieExpr> { nr }
+                    )
+                );
+                program.Declarations.Add(idemAxiom);
+
+                // Optional helper: forall r: real :: (r == nearest_real(r)) ==> (nearest_real(r) == r)
+                // (logically redundant, but sometimes helps)
+                var fixedPointCond = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.EQ,
+                    r,
+                    nr
+                );
+
+                var fixedPointBody = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.IMP,
+                    fixedPointCond,
+                    new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.EQ, nr, r)
+                );
+
+                var fixedPointAxiom = new BoogieAxiom(
+                    new BoogieQuantifiedExpr(
+                        isForall: true,
+                        qvars: new() { new BoogieIdentifierExpr("r") },
+                        qvarTypes: new() { BoogieType.Real },
+                        bodyExpr: fixedPointBody,
+                        trigger: new List<BoogieExpr> { nr }
+                    )
+                );
+                program.Declarations.Add(fixedPointAxiom);
+            }
+
+            // floor_real : real -> real
             {
                 var r = new BoogieFormalParam(new BoogieTypedIdent("r", BoogieType.Real));
                 var res = new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real));
                 program.Declarations.Add(
-                    new BoogieFunction("sqrt_real", new() { r }, new() { res })
+                    new BoogieFunction("floor_real", new() { r }, new() { res })
+                );
+            }
+            // axiom forall r: real :: floor_real(r) <= r
+            {
+                var rId = new BoogieIdentifierExpr("r");
+                var qvars = new List<BoogieIdentifierExpr> { rId };
+                var qtypes = new List<BoogieType> { BoogieType.Real };
+
+                var body = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.LE,
+                    new BoogieFunctionCall("floor_real", new() { rId }),
+                    rId
+                );
+
+                program.Declarations.Add(
+                    new BoogieAxiom(new BoogieQuantifiedExpr(true, qvars, qtypes, body))
+                );
+            }
+
+            // axiom forall r: real :: r < floor_real(r) + 1
+            {
+                var rId = new BoogieIdentifierExpr("r");
+                var qvars = new List<BoogieIdentifierExpr> { rId };
+                var qtypes = new List<BoogieType> { BoogieType.Real };
+
+                var rhs = new BoogieBinaryOperation(
+                    BoogieBinaryOperation.Opcode.ADD,
+                    new BoogieFunctionCall("floor_real", new() { rId }),
+                    new BoogieLiteralExpr(new Pfloat(1))
+                );
+
+                var body = new BoogieBinaryOperation(BoogieBinaryOperation.Opcode.LT, rId, rhs);
+
+                program.Declarations.Add(
+                    new BoogieAxiom(new BoogieQuantifiedExpr(true, qvars, qtypes, body))
                 );
             }
 
@@ -620,6 +2033,7 @@ namespace WasmToBoogie.Conversion
             }
             locals.Add(new BoogieLocalVariable(new BoogieTypedIdent("idx", BoogieType.Int)));
             locals.Add(new BoogieLocalVariable(new BoogieTypedIdent("entry_sp", BoogieType.Int)));
+            locals.Add(new BoogieLocalVariable(new BoogieTypedIdent("load_i", BoogieType.Int)));
 
             currentLocalMap = indexToId;
 
@@ -1051,6 +2465,182 @@ namespace WasmToBoogie.Conversion
                     break;
                 }
 
+               case MemoryOpNode mem:
+{
+    // 1) folded address first (if exists)
+    if (mem.Address != null)
+        TranslateNode(mem.Address, body);
+
+    // 2) address from stack
+    body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+
+    // idx := real_to_int($tmp1) + offset
+    var addrInt = new BoogieBinaryOperation(
+        BoogieBinaryOperation.Opcode.ADD,
+        new BoogieFunctionCall(
+            "real_to_int",
+            new() { new BoogieIdentifierExpr("$tmp1") }
+        ),
+        new BoogieLiteralExpr(mem.Offset)
+    );
+
+    body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("idx"), addrInt));
+
+    BoogieExpr idxExpr = new BoogieIdentifierExpr("idx");
+    var loadVar = new BoogieIdentifierExpr("load_i");
+
+    // helper: call load_i := mem_read_*(idx)
+    void CallRead(string procName)
+    {
+        body.AddStatement(
+            new BoogieCallCmd(
+                procName,
+                new() { idxExpr },
+                new() { loadVar }
+            )
+        );
+    }
+
+    // helper: push(int_to_real(load_i))
+    void PushLoadedIntAsReal()
+    {
+        body.AddStatement(
+            new BoogieCallCmd(
+                "push",
+                new()
+                {
+                    new BoogieFunctionCall("int_to_real", new() { loadVar })
+                },
+                new()
+            )
+        );
+    }
+
+    // helper: push(bits32_to_real(load_i))
+    void PushLoadedBits32AsReal()
+    {
+        body.AddStatement(
+            new BoogieCallCmd(
+                "push",
+                new()
+                {
+                    new BoogieFunctionCall("bits32_to_real", new() { loadVar })
+                },
+                new()
+            )
+        );
+    }
+
+    // helper: push(bits64_to_real(load_i))  (note: load_i is int, but represents a 64-bit payload abstractly)
+    void PushLoadedBits64AsReal()
+    {
+        body.AddStatement(
+            new BoogieCallCmd(
+                "push",
+                new()
+                {
+                    new BoogieFunctionCall("bits64_to_real", new() { loadVar })
+                },
+                new()
+            )
+        );
+    }
+
+    switch (mem.Op)
+    {
+        // 0x28 i32.load  (sign-extended 32 -> int)
+        case "i32.load":
+            CallRead("mem_read_s32");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x29 i64.load  (you can keep abstract mem_read_s64)
+        case "i64.load":
+            CallRead("mem_read_s64");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x2a f32.load (read u32 bits then bitcast)
+        case "f32.load":
+            CallRead("mem_read_u32");
+            PushLoadedBits32AsReal();
+            break;
+
+        // 0x2b f64.load (read u64 bits then bitcast)
+        case "f64.load":
+            CallRead("mem_read_u64");
+            PushLoadedBits64AsReal();
+            break;
+
+        // 0x2c i32.load8_s
+        case "i32.load8_s":
+            CallRead("mem_read_s8");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x2d i32.load8_u
+        case "i32.load8_u":
+            CallRead("mem_read_u8");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x2e i32.load16_s
+        case "i32.load16_s":
+            CallRead("mem_read_s16");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x2f i32.load16_u
+        case "i32.load16_u":
+            CallRead("mem_read_u16");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x30 i64.load8_s
+        case "i64.load8_s":
+            CallRead("mem_read_s8");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x31 i64.load8_u
+        case "i64.load8_u":
+            CallRead("mem_read_u8");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x32 i64.load16_s
+        case "i64.load16_s":
+            CallRead("mem_read_s16");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x33 i64.load16_u
+        case "i64.load16_u":
+            CallRead("mem_read_u16");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x34 i64.load32_s
+        case "i64.load32_s":
+            CallRead("mem_read_s32");
+            PushLoadedIntAsReal();
+            break;
+
+        // 0x35 i64.load32_u
+        case "i64.load32_u":
+            CallRead("mem_read_u32");
+            PushLoadedIntAsReal();
+            break;
+
+        default:
+            body.AddStatement(new BoogieCommentCmd($"// unsupported memory op: {mem.Op}"));
+            break;
+    }
+
+    break;
+}
+
+
                 case UnaryOpNode un:
                 {
                     if (un.Operand != null)
@@ -1114,6 +2704,24 @@ namespace WasmToBoogie.Conversion
                         );
 
                         body.AddStatement(new BoogieCallCmd("push", new() { sqrtExpr }, new()));
+                    }
+                    else if (un.Op == "f32.nearest" || un.Op == "f64.nearest")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+                        var nearestExpr = new BoogieFunctionCall(
+                            "nearest_real",
+                            new() { new BoogieIdentifierExpr("$tmp1") }
+                        );
+                        body.AddStatement(new BoogieCallCmd("push", new() { nearestExpr }, new()));
+                    }
+                    else if (un.Op == "f32.floor" || un.Op == "f64.floor")
+                    {
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+                        var flo = new BoogieFunctionCall(
+                            "floor_real",
+                            new() { new BoogieIdentifierExpr("$tmp1") }
+                        );
+                        body.AddStatement(new BoogieCallCmd("push", new() { flo }, new()));
                     }
                     else
                     {

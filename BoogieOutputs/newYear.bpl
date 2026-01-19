@@ -21,11 +21,23 @@ function min_real(x: real, y: real) : real
 {
     if (x) <= (y) then (x) else (y)
 }
-function max_real(x: real, y: real) : real
-{
-    if (x) >= (y) then (x) else (y)
-}
 function sqrt_real(r: real) returns (result: real);
+
+axiom(forall  r:real :: {sqrt_real(r)} (((r) >= (0.0)) ==> ((sqrt_real(r)) >= (0.0))));
+
+axiom(forall  r:real :: {sqrt_real(r)} (((r) >= (0.0)) ==> (((sqrt_real(r)) * (sqrt_real(r))) == (r))));
+function nearest_real(r: real) returns (result: real);
+
+axiom(forall  r:real :: {nearest_real(r)} ((((nearest_real(r)) - (0.5)) <= (r)) && ((r) <= ((nearest_real(r)) + (0.5)))));
+
+axiom(forall  r:real :: {nearest_real(r)} ((nearest_real(nearest_real(r))) == (nearest_real(r))));
+
+axiom(forall  r:real :: {nearest_real(r)} (((r) == (nearest_real(r))) ==> ((nearest_real(r)) == (r))));
+function floor_real(r: real) returns (result: real);
+
+axiom(forall  r:real ::  ((floor_real(r)) <= (r)));
+
+axiom(forall  r:real ::  ((r) < ((floor_real(r)) + (1.0))));
 procedure {:inline true} push(val: real);
 modifies $sp;
 modifies $stack;
@@ -90,9 +102,9 @@ implementation func_0()
     $tmp1 := 0.0;
     $tmp2 := 0.0;
     $tmp3 := 0.0;
-    call push(9.0);
+    call push(3.7);
     call popToTmp1();
-    call push(sqrt_real($tmp1));
+    call push(floor_real($tmp1));
     // // footer stack assert disabled
 }
 
