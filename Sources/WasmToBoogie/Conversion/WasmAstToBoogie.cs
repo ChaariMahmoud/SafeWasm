@@ -2278,264 +2278,284 @@ namespace WasmToBoogie.Conversion
                     break;
                 }
 
-               case MemoryOpNode mem:
-{
-    // Helpers communs
-    BoogieExpr Tmp1() => new BoogieIdentifierExpr("$tmp1");
-    BoogieExpr Tmp2() => new BoogieIdentifierExpr("$tmp2");
+                case MemoryOpNode mem:
+                {
+                    // Helpers communs
+                    BoogieExpr Tmp1() => new BoogieIdentifierExpr("$tmp1");
+                    BoogieExpr Tmp2() => new BoogieIdentifierExpr("$tmp2");
 
-    // --- helper: compute idx from an address already on the stack (top) ---
-    void PopAddrComputeIdx()
-    {
-        // pop address into $tmp1
-        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
+                    // --- helper: compute idx from an address already on the stack (top) ---
+                    void PopAddrComputeIdx()
+                    {
+                        // pop address into $tmp1
+                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
 
-        // idx := real_to_int($tmp1) + offset
-        var addrInt = new BoogieBinaryOperation(
-            BoogieBinaryOperation.Opcode.ADD,
-            new BoogieFunctionCall("real_to_int", new() { (BoogieExpr)Tmp1() }),
-            new BoogieLiteralExpr(mem.Offset)
-        );
+                        // idx := real_to_int($tmp1) + offset
+                        var addrInt = new BoogieBinaryOperation(
+                            BoogieBinaryOperation.Opcode.ADD,
+                            new BoogieFunctionCall("real_to_int", new() { (BoogieExpr)Tmp1() }),
+                            new BoogieLiteralExpr(mem.Offset)
+                        );
 
-        body.AddStatement(new BoogieAssignCmd(new BoogieIdentifierExpr("idx"), addrInt));
-    }
+                        body.AddStatement(
+                            new BoogieAssignCmd(new BoogieIdentifierExpr("idx"), addrInt)
+                        );
+                    }
 
-    // --- helper: compute idx from folded address node (mem.Address) ---
-    void EvalAddrComputeIdx()
-    {
-        if (mem.Address != null)
-            TranslateNode(mem.Address, body);
-        // address is now on stack
-        PopAddrComputeIdx();
-    }
+                    // --- helper: compute idx from folded address node (mem.Address) ---
+                    void EvalAddrComputeIdx()
+                    {
+                        if (mem.Address != null)
+                            TranslateNode(mem.Address, body);
+                        // address is now on stack
+                        PopAddrComputeIdx();
+                    }
 
-    // --- STORE path ---
-    bool isStore =
-        mem.Op is "i32.store" or "i64.store" or "f32.store" or "f64.store"
-        or "i32.store8" or "i32.store16"
-        or "i64.store8" or "i64.store16" or "i64.store32";
+                    // --- STORE path ---
+                    bool isStore =
+                        mem.Op
+                        is "i32.store"
+                            or "i64.store"
+                            or "f32.store"
+                            or "f64.store"
+                            or "i32.store8"
+                            or "i32.store16"
+                            or "i64.store8"
+                            or "i64.store16"
+                            or "i64.store32";
 
-    if (isStore)
-    {
-        // WebAssembly store expects stack order: ... addr, value
-        // If you have folded nodes, keep the same order:
-        //   evaluate address first, then value, so top-of-stack is value, below is addr.
-        if (mem.Address != null)
-            TranslateNode(mem.Address, body);
-        if (mem.Value != null)
-            TranslateNode(mem.Value, body);
+                    if (isStore)
+                    {
+                        // WebAssembly store expects stack order: ... addr, value
+                        // If you have folded nodes, keep the same order:
+                        //   evaluate address first, then value, so top-of-stack is value, below is addr.
+                        if (mem.Address != null)
+                            TranslateNode(mem.Address, body);
+                        if (mem.Value != null)
+                            TranslateNode(mem.Value, body);
 
-        // pop value -> $tmp2
-        body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new()));
+                        // pop value -> $tmp2
+                        body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new()));
 
-        // pop addr -> $tmp1 and compute idx
-        PopAddrComputeIdx();
+                        // pop addr -> $tmp1 and compute idx
+                        PopAddrComputeIdx();
 
-        // store_i := real_to_int($tmp2)
-        body.AddStatement(
-            new BoogieAssignCmd(
-                new BoogieIdentifierExpr("store_i"),
-                new BoogieFunctionCall("real_to_int", new() { (BoogieExpr)Tmp2() })
-            )
-        );
+                        // store_i := real_to_int($tmp2)
+                        body.AddStatement(
+                            new BoogieAssignCmd(
+                                new BoogieIdentifierExpr("store_i"),
+                                new BoogieFunctionCall("real_to_int", new() { (BoogieExpr)Tmp2() })
+                            )
+                        );
 
-        // dispatch write
-        switch (mem.Op)
-        {
-            case "i32.store":
-            case "f32.store":
-            case "i64.store32":
-                body.AddStatement(
-                    new BoogieCallCmd(
-                        "mem_write_u32",
-                        new()
+                        // dispatch write
+                        switch (mem.Op)
                         {
-                            new BoogieIdentifierExpr("idx"),
-                            new BoogieIdentifierExpr("store_i"),
-                        },
-                        new()
-                    )
-                );
-                break;
+                            case "i32.store":
+                            case "f32.store":
+                            case "i64.store32":
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "mem_write_u32",
+                                        new()
+                                        {
+                                            new BoogieIdentifierExpr("idx"),
+                                            new BoogieIdentifierExpr("store_i"),
+                                        },
+                                        new()
+                                    )
+                                );
+                                break;
 
-            case "i64.store":
-            case "f64.store":
-                body.AddStatement(
-                    new BoogieCallCmd(
-                        "mem_write_u64",
-                        new()
-                        {
-                            new BoogieIdentifierExpr("idx"),
-                            new BoogieIdentifierExpr("store_i"),
-                        },
-                        new()
-                    )
-                );
-                break;
+                            case "i64.store":
+                            case "f64.store":
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "mem_write_u64",
+                                        new()
+                                        {
+                                            new BoogieIdentifierExpr("idx"),
+                                            new BoogieIdentifierExpr("store_i"),
+                                        },
+                                        new()
+                                    )
+                                );
+                                break;
 
-            case "i32.store8":
-            case "i64.store8":
-                body.AddStatement(
-                    new BoogieCallCmd(
-                        "mem_write_u8",
-                        new()
-                        {
-                            new BoogieIdentifierExpr("idx"),
-                            new BoogieIdentifierExpr("store_i"),
-                        },
-                        new()
-                    )
-                );
-                break;
+                            case "i32.store8":
+                            case "i64.store8":
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "mem_write_u8",
+                                        new()
+                                        {
+                                            new BoogieIdentifierExpr("idx"),
+                                            new BoogieIdentifierExpr("store_i"),
+                                        },
+                                        new()
+                                    )
+                                );
+                                break;
 
-            case "i32.store16":
-            case "i64.store16":
-                body.AddStatement(
-                    new BoogieCallCmd(
-                        "mem_write_u16",
-                        new()
-                        {
-                            new BoogieIdentifierExpr("idx"),
-                            new BoogieIdentifierExpr("store_i"),
-                        },
-                        new()
-                    )
-                );
-                break;
+                            case "i32.store16":
+                            case "i64.store16":
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "mem_write_u16",
+                                        new()
+                                        {
+                                            new BoogieIdentifierExpr("idx"),
+                                            new BoogieIdentifierExpr("store_i"),
+                                        },
+                                        new()
+                                    )
+                                );
+                                break;
 
-            default:
-                body.AddStatement(new BoogieCommentCmd($"// unsupported store op: {mem.Op}"));
-                break;
-        }
+                            default:
+                                body.AddStatement(
+                                    new BoogieCommentCmd($"// unsupported store op: {mem.Op}")
+                                );
+                                break;
+                        }
 
-        break; // done
-    }
+                        break; // done
+                    }
 
-    // --- LOAD path ---
-    // evaluate address (folded) then pop it and compute idx
-    EvalAddrComputeIdx();
+                    // --- LOAD path ---
+                    // evaluate address (folded) then pop it and compute idx
+                    EvalAddrComputeIdx();
 
-    BoogieExpr idxExpr = new BoogieIdentifierExpr("idx");
-    var loadVar = new BoogieIdentifierExpr("load_i");
+                    BoogieExpr idxExpr = new BoogieIdentifierExpr("idx");
+                    var loadVar = new BoogieIdentifierExpr("load_i");
 
-    void CallRead(string procName)
-    {
-        body.AddStatement(new BoogieCallCmd(procName, new() { idxExpr }, new() { loadVar }));
-    }
+                    void CallRead(string procName)
+                    {
+                        body.AddStatement(
+                            new BoogieCallCmd(procName, new() { idxExpr }, new() { loadVar })
+                        );
+                    }
 
-    void PushLoadedIntAsReal()
-    {
-        body.AddStatement(
-            new BoogieCallCmd(
-                "push",
-                new() { new BoogieFunctionCall("int_to_real", new() { loadVar }) },
-                new()
-            )
-        );
-    }
+                    void PushLoadedIntAsReal()
+                    {
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new() { new BoogieFunctionCall("int_to_real", new() { loadVar }) },
+                                new()
+                            )
+                        );
+                    }
 
-    void PushLoadedBits32AsReal()
-    {
-        body.AddStatement(
-            new BoogieCallCmd(
-                "push",
-                new() { new BoogieFunctionCall("bits32_to_real", new() { loadVar }) },
-                new()
-            )
-        );
-    }
+                    void PushLoadedBits32AsReal()
+                    {
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new()
+                                {
+                                    new BoogieFunctionCall("bits32_to_real", new() { loadVar }),
+                                },
+                                new()
+                            )
+                        );
+                    }
 
-    void PushLoadedBits64AsReal()
-    {
-        body.AddStatement(
-            new BoogieCallCmd(
-                "push",
-                new() { new BoogieFunctionCall("bits64_to_real", new() { loadVar }) },
-                new()
-            )
-        );
-    }
+                    void PushLoadedBits64AsReal()
+                    {
+                        body.AddStatement(
+                            new BoogieCallCmd(
+                                "push",
+                                new()
+                                {
+                                    new BoogieFunctionCall("bits64_to_real", new() { loadVar }),
+                                },
+                                new()
+                            )
+                        );
+                    }
 
-    switch (mem.Op)
-    {
-        case "i32.load":
-            CallRead("mem_read_s32");
-            PushLoadedIntAsReal();
-            break;
+                    switch (mem.Op)
+                    {
+                        case "i32.load":
+                            CallRead("mem_read_s32");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load":
-            CallRead("mem_read_s64");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load":
+                            CallRead("mem_read_s64");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "f32.load":
-            CallRead("mem_read_u32");
-            PushLoadedBits32AsReal();
-            break;
+                        case "f32.load":
+                            CallRead("mem_read_u32");
+                            PushLoadedBits32AsReal();
+                            break;
 
-        case "f64.load":
-            CallRead("mem_read_u64");
-            PushLoadedBits64AsReal();
-            break;
+                        case "f64.load":
+                            CallRead("mem_read_u64");
+                            PushLoadedBits64AsReal();
+                            break;
 
-        case "i32.load8_s":
-            CallRead("mem_read_s8");
-            PushLoadedIntAsReal();
-            break;
+                        case "i32.load8_s":
+                            CallRead("mem_read_s8");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i32.load8_u":
-            CallRead("mem_read_u8");
-            PushLoadedIntAsReal();
-            break;
+                        case "i32.load8_u":
+                            CallRead("mem_read_u8");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i32.load16_s":
-            CallRead("mem_read_s16");
-            PushLoadedIntAsReal();
-            break;
+                        case "i32.load16_s":
+                            CallRead("mem_read_s16");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i32.load16_u":
-            CallRead("mem_read_u16");
-            PushLoadedIntAsReal();
-            break;
+                        case "i32.load16_u":
+                            CallRead("mem_read_u16");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load8_s":
-            CallRead("mem_read_s8");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load8_s":
+                            CallRead("mem_read_s8");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load8_u":
-            CallRead("mem_read_u8");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load8_u":
+                            CallRead("mem_read_u8");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load16_s":
-            CallRead("mem_read_s16");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load16_s":
+                            CallRead("mem_read_s16");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load16_u":
-            CallRead("mem_read_u16");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load16_u":
+                            CallRead("mem_read_u16");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load32_s":
-            CallRead("mem_read_s32");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load32_s":
+                            CallRead("mem_read_s32");
+                            PushLoadedIntAsReal();
+                            break;
 
-        case "i64.load32_u":
-            CallRead("mem_read_u32");
-            PushLoadedIntAsReal();
-            break;
+                        case "i64.load32_u":
+                            CallRead("mem_read_u32");
+                            PushLoadedIntAsReal();
+                            break;
 
-        default:
-            body.AddStatement(new BoogieCommentCmd($"// unsupported memory op: {mem.Op}"));
-            break;
-    }
+                        default:
+                            body.AddStatement(
+                                new BoogieCommentCmd($"// unsupported memory op: {mem.Op}")
+                            );
+                            break;
+                    }
 
-    break;
-}
-
+                    break;
+                }
 
                 case UnaryOpNode un:
                 {
