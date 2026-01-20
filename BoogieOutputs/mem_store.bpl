@@ -5,6 +5,9 @@ var $tmp2: real;
 var $tmp3: real;
 var $mem: [int]int;
 var $mem_pages: int;
+function to_u8(x: int) returns (r: int);
+
+axiom(forall  x:int ::  (((0) <= (to_u8(x))) && ((to_u8(x)) < (256))));
 procedure {:inline true} mem_read_u8(a: int) returns (result: int);
 implementation mem_read_u8(a: int) returns (result: int)
 {
@@ -198,12 +201,17 @@ function real_to_int(r: real) returns (result: int);
 function int_to_real(i: int) returns (result: real);
 function bits32_to_real(i: int) returns (result: real);
 function bits64_to_real(i: int) returns (result: real);
-function to_u8(x: int) returns (r: int);
-
-axiom(forall  x:int ::  (((0) <= (to_u8(x))) && ((to_u8(x)) < (256))));
 function min_real(x: real, y: real) : real
 {
     if (x) <= (y) then (x) else (y)
+}
+function max_real(x: real, y: real) : real
+{
+    if (x) >= (y) then (x) else (y)
+}
+function abs_real(x: real) : real
+{
+    if (x) >= (0.0) then (x) else (-(x))
 }
 function sqrt_real(r: real) returns (result: real);
 
@@ -215,8 +223,6 @@ function nearest_real(r: real) returns (result: real);
 axiom(forall  r:real :: {nearest_real(r)} ((((nearest_real(r)) - (0.5)) <= (r)) && ((r) <= ((nearest_real(r)) + (0.5)))));
 
 axiom(forall  r:real :: {nearest_real(r)} ((nearest_real(nearest_real(r))) == (nearest_real(r))));
-
-axiom(forall  r:real :: {nearest_real(r)} (((r) == (nearest_real(r))) ==> ((nearest_real(r)) == (r))));
 function floor_real(r: real) returns (result: real);
 
 axiom(forall  r:real ::  ((floor_real(r)) <= (r)));

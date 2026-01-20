@@ -8,7 +8,7 @@
     <packageTypes>
       <packageType name="DotnetTool" />
     </packageTypes>
-    <repository type="git" commit="6f16f10ade111161f17be55dd86644da6a460bea" />
+    <repository type="git" commit="d834381ab0bb0d35e5795745113d63c90ab06127" />
   </metadata>
   <files>
     <file src="/home/chaari/VeriWasm/obj/Debug/net9.0/SolToBoogieTest/Debug/DotnetToolSettings.xml" target="tools/net9.0/any/DotnetToolSettings.xml" />

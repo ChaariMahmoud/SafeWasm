@@ -1248,9 +1248,7 @@ namespace WasmToBoogie.Parser
                 || op.Contains(".store32")
             )
                 return true;
-
-            // memory.* (pour plus tard)
-            if (op == "memory.size" || op == "memory.grow")
+            if (op == "memory.size" || op == "memory.grow" || op == "memory.fill" || op == "memory.copy")
                 return true;
 
             return false;
