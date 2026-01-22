@@ -60,6 +60,7 @@ implementation pop()
 procedure {:inline true} popArgs2() returns (a1: real, a2: real);
 modifies $sp;
 modifies $stack;
+ensures $sp==old($sp)-2;
 implementation popArgs2() returns (a1: real, a2: real)
 {
     $sp := ($sp) - (1);
@@ -76,9 +77,13 @@ modifies $sp;
 modifies $stack;
 implementation func_0()
 {
+    
     var arg1: real;
     var arg2: real;
+    var save :int;
+    save := $sp;
     call arg1, arg2 := popArgs2();
+    
     call push(arg1);
     call push(arg2);
     call popToTmp1();

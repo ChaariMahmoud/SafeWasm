@@ -1,2 +1,2 @@
-BoogieOutputs/integration_test.bpl(618,4): Error: command assigns to a global variable that is not in the enclosing procedure's modifies clause: g_global_0
-1 type checking errors detected in BoogieOutputs/integration_test.bpl
+
+Boogie program verifier finished with 0 verified, 0 errors
