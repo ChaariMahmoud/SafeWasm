@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SolToBoogie")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.1-alpha+d834381ab0bb0d35e5795745113d63c90ab06127")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.1-alpha+a1634ea6542a5dea92103a7c55188b21470351c9")]
 [assembly: System.Reflection.AssemblyProductAttribute("SolToBoogie")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SolToBoogie")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.1.0")]

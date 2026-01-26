@@ -1,6 +1,6 @@
 using System;
-using WasmToBoogie.Parser.Ast;
 using System.Collections.Generic;
+using WasmToBoogie.Parser.Ast;
 
 namespace WasmToBoogie.Tools
 {

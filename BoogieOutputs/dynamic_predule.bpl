@@ -242,16 +242,6 @@ implementation pop()
     $sp := ($sp) - (1);
 }
 
-procedure {:inline true} popArgs1() returns (a1: real);
-modifies $sp;
-modifies $stack;
-implementation popArgs1() returns (a1: real)
-{
-    assume (($sp) >= (1));
-    $sp := ($sp) - (1);
-    a1 := $stack[$sp];
-}
-
 procedure func_0();
 modifies $tmp1;
 modifies $tmp2;
@@ -261,8 +251,6 @@ modifies $stack;
 modifies $mem;
 implementation func_0()
 {
-    var arg1: real;
-    var loc1: real;
     var idx: int;
     var entry_sp: int;
     var load_i: int;
@@ -271,140 +259,11 @@ implementation func_0()
     $tmp1 := 0.0;
     $tmp2 := 0.0;
     $tmp3 := 0.0;
-    assume (($sp) >= (1));
-    call arg1 := popArgs1();
-    loc1 := 0.0;
-    call push(arg1);
     call push(0.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(123456.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(8.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(2147483647.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u64(idx, store_i);
-    call push(arg1);
-    call push(16.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(3.25);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(24.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(6.5);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u64(idx, store_i);
-    call push(arg1);
-    call push(40.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(255.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u8(idx, store_i);
-    call push(arg1);
-    call push(42.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(65535.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u16(idx, store_i);
-    call push(arg1);
-    call push(48.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(255.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u8(idx, store_i);
-    call push(arg1);
-    call push(50.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(65535.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u16(idx, store_i);
-    call push(arg1);
-    call push(56.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(2147483647.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(0.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
     call popToTmp1();
     idx := (real_to_int($tmp1)) + (0);
     call load_i := mem_read_s32(idx);
     call push(int_to_real(load_i));
-    call loc1 := popArgs1();
-    // // footer stack assert disabled
-}
-
-procedure func_1();
-modifies $tmp1;
-modifies $tmp2;
-modifies $tmp3;
-modifies $sp;
-modifies $stack;
-modifies $mem;
-implementation func_1()
-{
-    var idx: int;
-    var entry_sp: int;
-    var load_i: int;
-    var store_i: int;
-    entry_sp := $sp;
-    $tmp1 := 0.0;
-    $tmp2 := 0.0;
-    $tmp3 := 0.0;
-    call push(0.0);
-    call func_0();
     // // footer stack assert disabled
 }
 

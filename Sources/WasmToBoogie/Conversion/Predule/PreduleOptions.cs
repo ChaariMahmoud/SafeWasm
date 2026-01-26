@@ -26,8 +26,7 @@ namespace WasmToBoogie.Conversion
         public bool EnableSqrtAxioms { get; init; } = true;
         public bool EnableNearestAxioms { get; init; } = true;
         public bool EnableFloorAxioms { get; init; } = true;
-
-        // Pour abs_real : false = uninterpreted (simple), true = défini par ITE
         public bool DefineAbsWithITE { get; init; } = true;
+        public bool AutoDetect { get; set; } = true;
     }
 }

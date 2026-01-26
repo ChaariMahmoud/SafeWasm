@@ -4,7 +4,20 @@ var $tmp1: real;
 var $tmp2: real;
 var $tmp3: real;
 var $mem: [int]int;
+const g_global_0: real;
+axiom g_global_0 ==10.0;
+var g_global_1: real;
+
+procedure InitGlobals();
+ modifies g_global_1;
+
+ implementation InitGlobals(){
+    g_global_1 :=0.0;
+}
+
+
 var $mem_pages: int;
+
 function to_u8(x: int) returns (r: int);
 
 axiom(forall  x:int ::  (((0) <= (to_u8(x))) && ((to_u8(x)) < (256))));
@@ -188,10 +201,46 @@ implementation mem_write_u64(a: int, v: int)
     call mem_write_u8((a) + (7), byte7_64(v));
 }
 
+function nd_real() returns (result: real);
+function bool_to_real(b: bool) : real
+{
+    if b then (1.0) else (0.0)
+}
+function real_to_bool(r: real) : bool
+{
+    if (r) == (0.0) then (false) else (true)
+}
 function real_to_int(r: real) returns (result: int);
 function int_to_real(i: int) returns (result: real);
 function bits32_to_real(i: int) returns (result: real);
 function bits64_to_real(i: int) returns (result: real);
+function min_real(x: real, y: real) : real
+{
+    if (x) <= (y) then (x) else (y)
+}
+function max_real(x: real, y: real) : real
+{
+    if (x) >= (y) then (x) else (y)
+}
+function abs_real(x: real) : real
+{
+    if (x) >= (0.0) then (x) else (-(x))
+}
+function sqrt_real(r: real) returns (result: real);
+
+axiom(forall  r:real :: {sqrt_real(r)} (((r) >= (0.0)) ==> ((sqrt_real(r)) >= (0.0))));
+
+axiom(forall  r:real :: {sqrt_real(r)} (((r) >= (0.0)) ==> (((sqrt_real(r)) * (sqrt_real(r))) == (r))));
+function nearest_real(r: real) returns (result: real);
+
+axiom(forall  r:real :: {nearest_real(r)} ((((nearest_real(r)) - (0.5)) <= (r)) && ((r) <= ((nearest_real(r)) + (0.5)))));
+
+axiom(forall  r:real :: {nearest_real(r)} ((nearest_real(nearest_real(r))) == (nearest_real(r))));
+function floor_real(r: real) returns (result: real);
+
+axiom(forall  r:real ::  ((floor_real(r)) <= (r)));
+
+axiom(forall  r:real ::  ((r) < ((floor_real(r)) + (1.0))));
 procedure {:inline true} push(val: real);
 modifies $sp;
 modifies $stack;
@@ -241,6 +290,7 @@ implementation pop()
     assume (($sp) > (0));
     $sp := ($sp) - (1);
 }
+// active request mutable 
 
 procedure {:inline true} popArgs1() returns (a1: real);
 modifies $sp;
@@ -252,6 +302,7 @@ implementation popArgs1() returns (a1: real)
     a1 := $stack[$sp];
 }
 
+
 procedure func_0();
 modifies $tmp1;
 modifies $tmp2;
@@ -259,9 +310,9 @@ modifies $tmp3;
 modifies $sp;
 modifies $stack;
 modifies $mem;
+modifies g_global_1;
 implementation func_0()
 {
-    var arg1: real;
     var loc1: real;
     var idx: int;
     var entry_sp: int;
@@ -271,118 +322,32 @@ implementation func_0()
     $tmp1 := 0.0;
     $tmp2 := 0.0;
     $tmp3 := 0.0;
-    assume (($sp) >= (1));
-    call arg1 := popArgs1();
     loc1 := 0.0;
-    call push(arg1);
-    call push(0.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(123456.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(8.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(2147483647.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u64(idx, store_i);
-    call push(arg1);
-    call push(16.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(3.25);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(24.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(6.5);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u64(idx, store_i);
-    call push(arg1);
-    call push(40.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(255.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u8(idx, store_i);
-    call push(arg1);
-    call push(42.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(65535.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u16(idx, store_i);
-    call push(arg1);
-    call push(48.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(255.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u8(idx, store_i);
-    call push(arg1);
-    call push(50.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(65535.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u16(idx, store_i);
-    call push(arg1);
-    call push(56.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call push(2147483647.0);
-    call popToTmp2();
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    store_i := real_to_int($tmp2);
-    call mem_write_u32(idx, store_i);
-    call push(arg1);
-    call push(0.0);
-    call popToTmp1();
-    call popToTmp2();
-    call push(($tmp2) + ($tmp1));
-    call popToTmp1();
-    idx := (real_to_int($tmp1)) + (0);
-    call load_i := mem_read_s32(idx);
-    call push(int_to_real(load_i));
+    call push(g_global_1);
     call loc1 := popArgs1();
+    call push(loc1);
+    call push(g_global_0);
+    call popToTmp1();
+    call popToTmp2();
+    call push(bool_to_real(($tmp2) >= ($tmp1)));
+    call popToTmp1();
+    if (real_to_bool($tmp1)) {
+        call push(0.0);
+        goto func_exit_2;
+block_end_1:
+    } else {
+        call push(loc1);
+        call push(1.0);
+        call popToTmp1();
+        call popToTmp2();
+        call push(($tmp2) + ($tmp1));
+        call g_global_1 := popArgs1();
+        call push(1.0);
+        goto func_exit_2;
+block_end_4:
+block_end_3:
+    }
+func_exit_2:
     // // footer stack assert disabled
 }
 
@@ -393,8 +358,11 @@ modifies $tmp3;
 modifies $sp;
 modifies $stack;
 modifies $mem;
+modifies g_global_1;
+assert (g_global_1 > (0)) 
 implementation func_1()
 {
+    var loc1: real;
     var idx: int;
     var entry_sp: int;
     var load_i: int;
@@ -403,8 +371,23 @@ implementation func_1()
     $tmp1 := 0.0;
     $tmp2 := 0.0;
     $tmp3 := 0.0;
+    loc1 := 0.0;
+    call push(g_global_1);
+    call loc1 := popArgs1();
+    call push(loc1);
     call push(0.0);
-    call func_0();
+    call popToTmp1();
+    call popToTmp2();
+    call push(bool_to_real(($tmp2) > ($tmp1)));
+    call popToTmp1();
+    if (real_to_bool($tmp1)) {
+        call push(loc1);
+        call push(1.0);
+        call popToTmp1();
+        call popToTmp2();
+        call push(($tmp2) - ($tmp1));
+        call g_global_1 := popArgs1();
+    }
     // // footer stack assert disabled
 }
 
