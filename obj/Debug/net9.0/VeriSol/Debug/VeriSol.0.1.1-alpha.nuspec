@@ -8,7 +8,7 @@
     <packageTypes>
       <packageType name="DotnetTool" />
     </packageTypes>
-    <repository type="git" url="https://github.com/microsoft/verisol" commit="a1634ea6542a5dea92103a7c55188b21470351c9" />
+    <repository type="git" url="https://github.com/microsoft/verisol" commit="89e0153a468ecb3737baf1570097c5acdf8a7139" />
   </metadata>
   <files>
     <file src="/home/chaari/VeriWasm/obj/Debug/net9.0/VeriSol/Debug/DotnetToolSettings.xml" target="tools/net9.0/any/DotnetToolSettings.xml" />

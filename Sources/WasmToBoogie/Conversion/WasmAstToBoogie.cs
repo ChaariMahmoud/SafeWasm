@@ -12,8 +12,7 @@ namespace WasmToBoogie.Conversion
         private readonly string contractName;
         private int labelCounter = 0;
 
-        // Flag: assertion de pile à la sortie de fonction
-        public bool EnableFooterStackAssert { get; set; } = false;
+        
 
         // Module Boogie en construction
         private BoogieProgram? program;
@@ -96,7 +95,7 @@ namespace WasmToBoogie.Conversion
             n = Regex.Replace(n, @"[^A-Za-z0-9_]", "_");
             if (!char.IsLetter(n[0]) && n[0] != '_')
                 n = "_" + n;
-            return "g_" + n;
+            return  n;
         }
 
         private string ResolveGlobalKey(int? index, string? name)
@@ -309,24 +308,6 @@ namespace WasmToBoogie.Conversion
                     new BoogieLiteralExpr(n)
                 )
             );
-
-            if (EnableFooterStackAssert)
-            {
-                body.AddStatement(
-                    new BoogieAssertCmd(
-                        new BoogieBinaryOperation(
-                            BoogieBinaryOperation.Opcode.EQ,
-                            new BoogieIdentifierExpr("$sp"),
-                            expected
-                        )
-                    )
-                );
-            }
-            else
-            {
-                body.AddStatement(new BoogieCommentCmd("// footer stack assert disabled"));
-            }
-
             string funcName = SanitizeFunctionName(func.Name, contractName);
 
             var mods = new List<BoogieGlobalVariable>
@@ -1219,10 +1200,6 @@ namespace WasmToBoogie.Conversion
                     }
                     else if (bn.Op == "f32.min" || bn.Op == "f64.min")
                     {
-                        // operands already evaluated
-                        body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // y
-                        body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // x
-
                         var minExpr = new BoogieFunctionCall(
                             "min_real",
                             new()

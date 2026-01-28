@@ -3,15 +3,6 @@ var $sp: int;
 var $tmp1: real;
 var $tmp2: real;
 var $tmp3: real;
-var $globals_inited: bool;
-function bool_to_real(b: bool) : real
-{
-    if b then (1.0) else (0.0)
-}
-function real_to_bool(r: real) : bool
-{
-    if (r) == (0.0) then (false) else (true)
-}
 procedure {:inline true} push(val: real);
 modifies $sp;
 modifies $stack;
@@ -62,27 +53,40 @@ implementation pop()
     $sp := ($sp) - (1);
 }
 
-var Counter: real;
-procedure {:inline true} popArgs1() returns (a1: real);
+procedure {:inline true} popArgs6() returns (a1: real, a2: real, a3: real, a4: real, a5: real, a6: real);
 modifies $sp;
 modifies $stack;
-implementation popArgs1() returns (a1: real)
+implementation popArgs6() returns (a1: real, a2: real, a3: real, a4: real, a5: real, a6: real)
 {
-    assume (($sp) >= (1));
+    assume (($sp) >= (6));
+    $sp := ($sp) - (1);
+    a6 := $stack[$sp];
+    $sp := ($sp) - (1);
+    a5 := $stack[$sp];
+    $sp := ($sp) - (1);
+    a4 := $stack[$sp];
+    $sp := ($sp) - (1);
+    a3 := $stack[$sp];
+    $sp := ($sp) - (1);
+    a2 := $stack[$sp];
     $sp := ($sp) - (1);
     a1 := $stack[$sp];
 }
 
-var Max: real;
-procedure inc_and_check();
+procedure func_0();
 modifies $tmp1;
 modifies $tmp2;
 modifies $tmp3;
 modifies $sp;
 modifies $stack;
-modifies Counter;
-implementation inc_and_check()
+implementation func_0()
 {
+    var arg1: real;
+    var arg2: real;
+    var arg3: real;
+    var arg4: real;
+    var arg5: real;
+    var arg6: real;
     var idx: int;
     var entry_sp: int;
     var load_i: int;
@@ -91,16 +95,13 @@ implementation inc_and_check()
     $tmp1 := 0.0;
     $tmp2 := 0.0;
     $tmp3 := 0.0;
-    call push(Counter);
-    call push(1.0);
+    assume (($sp) >= (6));
+    call arg1, arg2, arg3, arg4, arg5, arg6 := popArgs6();
+    call push(arg5);
+    call push(arg6);
     call popToTmp1();
     call popToTmp2();
     call push(($tmp2) + ($tmp1));
-    call Counter := popArgs1();
-    call push(Counter);
-    call push(Max);
-    call popToTmp1();
-    call popToTmp2();
-    call push(bool_to_real(($tmp2) < ($tmp1)));
+    // // footer stack assert disabled
 }
 

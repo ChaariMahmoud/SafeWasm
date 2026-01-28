@@ -1516,6 +1516,21 @@ namespace BoogieAST
         }
     }
 
+    public class BoogieOldExpr : BoogieExpr
+    {
+        public BoogieExpr Expr { get; set; }
+
+        public BoogieOldExpr(BoogieExpr expr)
+        {
+            this.Expr = expr;
+        }
+
+        public override string ToString()
+        {
+            return $"old({Expr.ToString()})";
+        }
+    }
+
     public class BoogieTupleExpr : BoogieExpr
     {
         public List<BoogieExpr> Arguments { get; set; }

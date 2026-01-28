@@ -2,6 +2,7 @@ using System.Collections.Generic;
 
 namespace WasmToBoogie.Parser.Ast
 {
+    public enum WasmValueType { I32, I64, F32, F64 }
     public abstract class WasmNode { }
 
     public class ConstNode : WasmNode
@@ -98,6 +99,15 @@ namespace WasmToBoogie.Parser.Ast
         public List<WasmNode> Args { get; set; } = new();
     }
 
+    public class GlobalDeclNode : WasmNode
+    {
+        public int? Index { get; set; }
+        public string? Name { get; set; }
+        public bool IsMutable { get; set; }
+        public WasmValueType ValType { get; set; }
+        public WasmNode? Init { get; set; }
+    }
+
     public class GlobalGetNode : WasmNode
     {
         public int? Index { get; set; }
@@ -136,9 +146,18 @@ namespace WasmToBoogie.Parser.Ast
         public int ResultCount { get; set; }
         public Dictionary<string, int> LocalIndexByName { get; set; } = new(); // params first [0..n-1], then locals
     }
-
+    public class WasmGlobal
+    {
+        public int Index { get; set; }
+        public string? Name { get; set; }
+        public bool IsMutable { get; set; }
+        public string ValType { get; set; } = "i32";
+        public string? InitConst { get; set; }
+    }
     public class WasmModule
     {
+            public List<WasmGlobal> Globals { get; } = new();
+    public Dictionary<string,int> GlobalIndexByName { get; } = new();
         public List<WasmFunction> Functions { get; set; } = new();
     }
 

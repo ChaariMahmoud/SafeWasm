@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using SharedConfig;
 using WasmToBoogie.Parser.Ast;
@@ -74,7 +75,6 @@ namespace WasmToBoogie.Parser
                         if (k.HasValue)
                             max = Math.Max(max, k.Value);
 
-                        // Also dive into folded value in LocalSet
                         if (n is LocalSetNode s && s.Value != null)
                             Walk(s.Value);
                         break;
@@ -125,23 +125,31 @@ namespace WasmToBoogie.Parser
                         Walk(s.Cond);
                         break;
 
+                    case MemoryOpNode mem:
+                        if (mem.Address != null) Walk(mem.Address);
+                        if (mem.Value != null) Walk(mem.Value);
+                        break;
+
+                    // benign nodes
                     case UnreachableNode:
                     case ReturnNode:
                     case NopNode:
                     case BrTableNode:
-                        // nothing to collect for locals
-                        break;
-
                     case BrNode:
                     case RawInstructionNode:
                     case ConstNode:
-                        // nothing
+                    case GlobalGetNode:
+                    case GlobalSetNode:
+                        break;
+
+                    default:
                         break;
                 }
             }
 
             foreach (var n in body)
                 Walk(n);
+
             return max; // -1 means “no locals referenced”
         }
 
@@ -161,8 +169,78 @@ namespace WasmToBoogie.Parser
 
             PrintModuleAST(modulePtr);
 
+            // ✅ IMPORTANT: create ONE WasmModule (your previous code created it twice)
             var module = new WasmModule();
 
+            // ---------------- Globals (module-level) ----------------
+            int gCount = 0;
+            try { gCount = GetGlobalCount(modulePtr); } catch { }
+
+            Console.WriteLine($"🌍 Number of globals: {gCount}");
+
+            for (int gi = 0; gi < gCount; gi++)
+            {
+                string? gName = null;
+                try
+                {
+                    IntPtr namePtr = GetGlobalNameByIndex(modulePtr, gi);
+                    var nm = namePtr != IntPtr.Zero ? Marshal.PtrToStringAnsi(namePtr) : null;
+                    if (!string.IsNullOrEmpty(nm))
+                        gName = nm; // often already includes '$'
+                }
+                catch { }
+
+                bool mut = false;
+                try { mut = GetGlobalIsMutableByIndex(modulePtr, gi); } catch { }
+
+                string valType = "i32";
+                IntPtr typePtr = IntPtr.Zero;
+                try
+                {
+                    typePtr = GetGlobalTypeByIndex(modulePtr, gi);
+                    var ty = typePtr != IntPtr.Zero ? Marshal.PtrToStringAnsi(typePtr) : null;
+                    if (!string.IsNullOrEmpty(ty))
+                        valType = ty!;
+                }
+                catch { }
+                finally
+                {
+                    // ⚠️ Only FreeCString here if your C wrapper strdup()s the returned type string.
+                    // If it's owned by Binaryen, DO NOT free it.
+                    if (typePtr != IntPtr.Zero) FreeCString(typePtr);
+                }
+
+                string? init = null;
+                IntPtr initPtr = IntPtr.Zero;
+                try
+                {
+                    initPtr = GetGlobalInitConstByIndex(modulePtr, gi);
+                    init = initPtr != IntPtr.Zero ? Marshal.PtrToStringAnsi(initPtr) : null;
+                }
+                catch { }
+                finally
+                {
+                    if (initPtr != IntPtr.Zero) FreeCString(initPtr);
+                }
+
+                module.Globals.Add(new WasmGlobal
+                {
+                    Index = gi,
+                    Name = gName,
+                    IsMutable = mut,
+                    ValType = valType,
+                    InitConst = init
+                });
+
+                if (!string.IsNullOrEmpty(gName))
+                    module.GlobalIndexByName[gName!] = gi;
+
+                Console.WriteLine(
+                    $"   🔸 global[{gi}] {gName ?? "<noname>"} (mut={mut}) {valType} init={init ?? "<none>"}"
+                );
+            }
+
+            // ---------------- Functions ----------------
             int fnCount = GetFunctionCount(modulePtr);
             Console.WriteLine($"🔢 Number of functions: {fnCount}");
 
@@ -177,17 +255,17 @@ namespace WasmToBoogie.Parser
                     {
                         var nm = Marshal.PtrToStringAnsi(namePtr);
                         if (!string.IsNullOrEmpty(nm))
-                            funcName = "$" + nm; // keep '$' to match sanitizer later
+                            funcName = "$" + nm; // keep '$'
                     }
                 }
                 catch
-                { /* wrapper may lack this symbol */
+                {
+                    // wrapper may lack this symbol
                 }
 
                 // body text (temp module)
                 IntPtr bodyPtr = GetFunctionBodyText(modulePtr, fi);
-                string watBody =
-                    bodyPtr != IntPtr.Zero ? (Marshal.PtrToStringAnsi(bodyPtr) ?? "") : "";
+                string watBody = bodyPtr != IntPtr.Zero ? (Marshal.PtrToStringAnsi(bodyPtr) ?? "") : "";
                 if (bodyPtr != IntPtr.Zero)
                     FreeCString(bodyPtr);
 
@@ -202,8 +280,6 @@ namespace WasmToBoogie.Parser
                 {
                     if (tokens[idx] == ")")
                     {
-                        // These are often the closers of the wrapping (module ...) we already consumed.
-                        // Don't send them to ParseNode (it throws by design).
                         Console.WriteLine($"↩️ Skipping stray ')' at index {idx}");
                         idx++;
                         continue;
@@ -211,32 +287,22 @@ namespace WasmToBoogie.Parser
 
                     Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
                     body.Add(ParseNode(tokens, ref idx));
-                    Console.WriteLine($"\n🕽️ ParseNode call at index {idx}");
                 }
 
                 var func = new WasmFunction { Body = body, Name = funcName };
+
+                // signature info from wrapper
                 int paramCount = 0;
-                try
-                {
-                    paramCount = GetFunctionParamCount(modulePtr, fi);
-                }
-                catch { }
+                try { paramCount = GetFunctionParamCount(modulePtr, fi); } catch { }
                 func.ParamCount = Math.Max(0, paramCount);
 
-                // 3.2) Compter les résultats via le wrapper  // NEW
                 int resultCount = 0;
-                try
-                {
-                    resultCount = GetFunctionResultCount(modulePtr, fi);
-                }
-                catch { } // NEW
-                func.ResultCount = Math.Max(0, resultCount); // NEW
+                try { resultCount = GetFunctionResultCount(modulePtr, fi); } catch { }
+                func.ResultCount = Math.Max(0, resultCount);
 
                 // infer local count by scanning references
                 int maxIdx = ComputeMaxLocalIndexInBody(func.Body);
                 int total = (maxIdx >= 0 ? (maxIdx + 1) : 0);
-                // if (total < func.ParamCount) total = func.ParamCount;
-                // func.LocalCount = Math.Max(0, total - func.ParamCount);
 
                 if (func.LocalCount + func.ParamCount < total)
                     func.LocalCount = Math.Max(0, total - func.ParamCount);
@@ -245,11 +311,11 @@ namespace WasmToBoogie.Parser
                 for (int k = 0; k < func.ParamCount + func.LocalCount; k++)
                     func.LocalIndexByName["$" + k] = k;
 
-                // try to parse header for explicit names/slots
+                // parse header for explicit names/slots (if present in token stream)
                 PopulateFunctionSignature(tokens, func);
 
                 Console.WriteLine(
-                    $"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}"
+                    $"🧭 Signature: name={func.Name ?? "<anonymous>"}, params={func.ParamCount}, locals={func.LocalCount}, results={func.ResultCount}"
                 );
 
                 module.Functions.Add(func);
@@ -257,8 +323,80 @@ namespace WasmToBoogie.Parser
 
             Console.WriteLine($"✅ WAT AST generated with {module.Functions.Count} functions.");
 
+            // ---------------- Resolve global names to indices (after module is filled) ----------------
+            void ResolveGlobals(WasmNode n)
+            {
+                switch (n)
+                {
+                    case GlobalGetNode g:
+                        if (g.Index == null && g.Name != null && module.GlobalIndexByName.TryGetValue(g.Name, out var gi))
+                            g.Index = gi;
+                        break;
+
+                    case GlobalSetNode s:
+                        if (s.Index == null && s.Name != null && module.GlobalIndexByName.TryGetValue(s.Name, out var gsi))
+                            s.Index = gsi;
+                        if (s.Value != null) ResolveGlobals(s.Value);
+                        break;
+
+                    case UnaryOpNode u:
+                        if (u.Operand != null) ResolveGlobals(u.Operand);
+                        break;
+
+                    case BinaryOpNode b:
+                        ResolveGlobals(b.Left);
+                        ResolveGlobals(b.Right);
+                        break;
+
+                    case IfNode iff:
+                        ResolveGlobals(iff.Condition);
+                        foreach (var x in iff.ThenBody) ResolveGlobals(x);
+                        if (iff.ElseBody != null)
+                            foreach (var x in iff.ElseBody)
+                                ResolveGlobals(x);
+                        break;
+
+                    case BlockNode blk:
+                        foreach (var x in blk.Body) ResolveGlobals(x);
+                        break;
+
+                    case LoopNode lp:
+                        foreach (var x in lp.Body) ResolveGlobals(x);
+                        break;
+
+                    case BrIfNode brIf:
+                        ResolveGlobals(brIf.Condition);
+                        break;
+
+                    case CallNode c:
+                        if (c.Args != null)
+                            foreach (var a in c.Args)
+                                ResolveGlobals(a);
+                        break;
+
+                    case SelectNode s2:
+                        ResolveGlobals(s2.V1);
+                        ResolveGlobals(s2.V2);
+                        ResolveGlobals(s2.Cond);
+                        break;
+
+                    case MemoryOpNode mem:
+                        if (mem.Address != null) ResolveGlobals(mem.Address);
+                        if (mem.Value != null) ResolveGlobals(mem.Value);
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+
+            foreach (var f in module.Functions)
+                foreach (var n in f.Body)
+                    ResolveGlobals(n);
+
             // Verify labels (optional)
             VerifyLabels(module);
+
             return module;
         }
 
@@ -333,6 +471,10 @@ namespace WasmToBoogie.Parser
                         foreach (var a in c.Args)
                             Walk(a);
                         break;
+                    case MemoryOpNode mem:
+                        if (mem.Address != null) Walk(mem.Address);
+                        if (mem.Value != null) Walk(mem.Value);
+                        break;
                 }
             }
 
@@ -364,11 +506,7 @@ namespace WasmToBoogie.Parser
 
         private static int? TryParseAutoName(string? name)
         {
-            if (
-                !string.IsNullOrEmpty(name)
-                && name![0] == '$'
-                && int.TryParse(name.AsSpan(1), out var k)
-            )
+            if (!string.IsNullOrEmpty(name) && name![0] == '$' && int.TryParse(name.AsSpan(1), out var k))
                 return k;
             return null;
         }
@@ -386,14 +524,13 @@ namespace WasmToBoogie.Parser
                         i++;
                     }
 
-                    int paramIndex = func.ParamCount; // prérempli par wrapper
-                    int localIndex = func.LocalCount; // prérempli par inférence
-                    int resultCount = func.ResultCount; // prérempli par wrapper
+                    int paramIndex = func.ParamCount; // prefilled by wrapper
+                    int localIndex = func.LocalCount; // prefilled by inference
+                    int resultCount = func.ResultCount; // prefilled by wrapper
 
                     for (int j = i; j < tokens.Count - 1; j++)
                     {
-                        if (tokens[j] != "(")
-                            continue;
+                        if (tokens[j] != "(") continue;
                         string head = tokens[j + 1];
 
                         if (head == "param")
@@ -411,17 +548,13 @@ namespace WasmToBoogie.Parser
                                         paramIndex++;
                                         j++;
                                     }
-                                    else
-                                    { /* ignore */
-                                    }
                                 }
                                 else if (NumTypes.Contains(tokens[j]))
                                 {
                                     paramIndex++;
                                     j++;
                                 }
-                                else
-                                    j++;
+                                else j++;
                             }
                             func.ParamCount = paramIndex;
                         }
@@ -436,12 +569,8 @@ namespace WasmToBoogie.Parser
                                     j++;
                                     if (j < tokens.Count && NumTypes.Contains(tokens[j]))
                                     {
-                                        func.LocalIndexByName[name] =
-                                            func.ParamCount + (localIndex++);
+                                        func.LocalIndexByName[name] = func.ParamCount + (localIndex++);
                                         j++;
-                                    }
-                                    else
-                                    { /* ignore */
                                     }
                                 }
                                 else if (NumTypes.Contains(tokens[j]))
@@ -449,14 +578,12 @@ namespace WasmToBoogie.Parser
                                     localIndex++;
                                     j++;
                                 }
-                                else
-                                    j++;
+                                else j++;
                             }
                             func.LocalCount = localIndex;
                         }
                         else if (head == "result")
                         {
-                            // (result i32) ou (result i32 i32)
                             j += 2;
                             int added = 0;
                             while (j < tokens.Count && tokens[j] != ")")
@@ -466,11 +593,7 @@ namespace WasmToBoogie.Parser
                                     added++;
                                     j++;
                                 }
-                                else
-                                    j++;
-                            }
-                            if (added == 0 && j < tokens.Count && tokens[j] == ")")
-                            { /* (result) vide → 0 */
+                                else j++;
                             }
                             resultCount += added;
                             func.ResultCount = resultCount;
@@ -484,7 +607,6 @@ namespace WasmToBoogie.Parser
                 }
             }
 
-            // Ensure $0..$N existent
             for (int k = 0; k < func.ParamCount + func.LocalCount; k++)
             {
                 var auto = "$" + k.ToString();
@@ -538,23 +660,11 @@ namespace WasmToBoogie.Parser
             switch (node)
             {
                 case BlockNode blockNode:
-                    VerifyBlockNode(
-                        blockNode,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
+                    VerifyBlockNode(blockNode, availableLabels, labelScopes, labelDepths, currentDepth);
                     break;
 
                 case LoopNode loopNode:
-                    VerifyLoopNode(
-                        loopNode,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
+                    VerifyLoopNode(loopNode, availableLabels, labelScopes, labelDepths, currentDepth);
                     break;
 
                 case BrNode brNode:
@@ -573,10 +683,7 @@ namespace WasmToBoogie.Parser
                             return;
                         if (!availableLabels.Contains(lab))
                         {
-                            var avail =
-                                availableLabels.Count > 0
-                                    ? string.Join(", ", availableLabels)
-                                    : "aucun";
+                            var avail = availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
                             throw new Exception(
                                 $"❌ Label invalide dans br_table {kind} : {lab}. Labels disponibles : {avail}"
                             );
@@ -589,55 +696,19 @@ namespace WasmToBoogie.Parser
                 }
 
                 case UnaryOpNode unaryNode:
-                    VerifyLabelsInNode(
-                        unaryNode.Operand,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
+                    VerifyLabelsInNode(unaryNode.Operand, availableLabels, labelScopes, labelDepths, currentDepth);
                     break;
 
                 case BinaryOpNode binaryNode:
-                    VerifyLabelsInNode(
-                        binaryNode.Left,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
-                    VerifyLabelsInNode(
-                        binaryNode.Right,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
+                    VerifyLabelsInNode(binaryNode.Left, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLabelsInNode(binaryNode.Right, availableLabels, labelScopes, labelDepths, currentDepth);
                     break;
 
                 case IfNode ifNode:
-                    VerifyLabelsInNode(
-                        ifNode.Condition,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
-                    VerifyLabelsInNode(
-                        ifNode.ThenBody,
-                        availableLabels,
-                        labelScopes,
-                        labelDepths,
-                        currentDepth
-                    );
+                    VerifyLabelsInNode(ifNode.Condition, availableLabels, labelScopes, labelDepths, currentDepth);
+                    VerifyLabelsInNode(ifNode.ThenBody, availableLabels, labelScopes, labelDepths, currentDepth);
                     if (ifNode.ElseBody != null)
-                        VerifyLabelsInNode(
-                            ifNode.ElseBody,
-                            availableLabels,
-                            labelScopes,
-                            labelDepths,
-                            currentDepth
-                        );
+                        VerifyLabelsInNode(ifNode.ElseBody, availableLabels, labelScopes, labelDepths, currentDepth);
                     break;
 
                 // benign nodes
@@ -651,7 +722,9 @@ namespace WasmToBoogie.Parser
                 case CallNode:
                 case ConstNode:
                 case RawInstructionNode:
-                    //case BrTableNode:
+                case GlobalGetNode:
+                case GlobalSetNode:
+                case MemoryOpNode:
                     break;
             }
         }
@@ -669,23 +742,17 @@ namespace WasmToBoogie.Parser
             if (!string.IsNullOrEmpty(blockNode.Label))
             {
                 if (availableLabels.Contains(blockNode.Label))
-                    throw new Exception(
-                        $"❌ Duplicate label found: {blockNode.Label} (depth {currentDepth})"
-                    );
+                    throw new Exception($"❌ Duplicate label found: {blockNode.Label} (depth {currentDepth})");
+
                 availableLabels.Add(blockNode.Label);
                 newScope.Add(blockNode.Label);
                 labelDepths[blockNode.Label] = currentDepth;
-                Console.WriteLine(
-                    $"🔹 Block label added: {blockNode.Label} (depth {currentDepth})"
-                );
+
+                Console.WriteLine($"🔹 Block label added: {blockNode.Label} (depth {currentDepth})");
             }
-            VerifyLabelsInNode(
-                blockNode.Body,
-                availableLabels,
-                labelScopes,
-                labelDepths,
-                currentDepth + 1
-            );
+
+            VerifyLabelsInNode(blockNode.Body, availableLabels, labelScopes, labelDepths, currentDepth + 1);
+
             labelScopes.Pop();
             if (!string.IsNullOrEmpty(blockNode.Label))
             {
@@ -704,24 +771,21 @@ namespace WasmToBoogie.Parser
         {
             var newScope = new HashSet<string>();
             labelScopes.Push(newScope);
+
             if (!string.IsNullOrEmpty(loopNode.Label))
             {
                 if (availableLabels.Contains(loopNode.Label))
-                    throw new Exception(
-                        $"❌ Label dupliqué trouvé : {loopNode.Label} (profondeur {currentDepth})"
-                    );
+                    throw new Exception($"❌ Label dupliqué trouvé : {loopNode.Label} (profondeur {currentDepth})");
+
                 availableLabels.Add(loopNode.Label);
                 newScope.Add(loopNode.Label);
                 labelDepths[loopNode.Label] = currentDepth;
+
                 Console.WriteLine($"🔹 Loop label added: {loopNode.Label} (depth {currentDepth})");
             }
-            VerifyLabelsInNode(
-                loopNode.Body,
-                availableLabels,
-                labelScopes,
-                labelDepths,
-                currentDepth + 1
-            );
+
+            VerifyLabelsInNode(loopNode.Body, availableLabels, labelScopes, labelDepths, currentDepth + 1);
+
             labelScopes.Pop();
             if (!string.IsNullOrEmpty(loopNode.Label))
             {
@@ -743,19 +807,17 @@ namespace WasmToBoogie.Parser
             {
                 BrNode brNode => brNode.Label,
                 BrIfNode brIfNode => brIfNode.Label,
-                _ => throw new ArgumentException(
-                    $"Type de nœud de branchement non supporté : {branchNode.GetType()}"
-                ),
+                _ => throw new ArgumentException($"Type de nœud de branchement non supporté : {branchNode.GetType()}"),
             };
 
             if (!IsNumericDepthLocal(label) && !availableLabels.Contains(label))
             {
-                var availableLabelsList =
-                    availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
+                var availableLabelsList = availableLabels.Count > 0 ? string.Join(", ", availableLabels) : "aucun";
                 throw new Exception(
                     $"❌ Label invalide dans {branchType} : {label}. Labels disponibles : {availableLabelsList}"
                 );
             }
+
             var labelDepth = labelDepths.GetValueOrDefault(label, -1);
             Console.WriteLine($"🔹 {branchType} to valid label: {label} (depth {labelDepth})");
         }
@@ -766,8 +828,8 @@ namespace WasmToBoogie.Parser
         {
             return new List<string>(
                 wat.Replace("(", " ( ")
-                    .Replace(")", " ) ")
-                    .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                   .Replace(")", " ) ")
+                   .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
             );
         }
 
@@ -779,7 +841,7 @@ namespace WasmToBoogie.Parser
                 string op = tokens[index++];
                 Console.WriteLine($"🔸 Block start: ({op}");
 
-                if (op.EndsWith(".const"))
+                if (op.EndsWith(".const", StringComparison.Ordinal))
                 {
                     string value = tokens[index++];
                     ExpectToken(tokens, ref index, ")");
@@ -789,11 +851,10 @@ namespace WasmToBoogie.Parser
                 else if (op == "local.get")
                 {
                     string tok = tokens[index++];
-                    int n;
                     var node = new LocalGetNode();
-                    if (tok.StartsWith("$"))
+                    if (tok.StartsWith("$", StringComparison.Ordinal))
                         node.Name = tok;
-                    else if (int.TryParse(tok, out n))
+                    else if (int.TryParse(tok, out var n))
                         node.Index = n;
                     ExpectToken(tokens, ref index, ")");
                     return node;
@@ -801,11 +862,10 @@ namespace WasmToBoogie.Parser
                 else if (op == "local.set")
                 {
                     string tok = tokens[index++];
-                    int n;
                     var node = new LocalSetNode();
-                    if (tok.StartsWith("$"))
+                    if (tok.StartsWith("$", StringComparison.Ordinal))
                         node.Name = tok;
-                    else if (int.TryParse(tok, out n))
+                    else if (int.TryParse(tok, out var n))
                         node.Index = n;
 
                     if (index < tokens.Count && tokens[index] != ")")
@@ -817,11 +877,10 @@ namespace WasmToBoogie.Parser
                 else if (op == "local.tee")
                 {
                     string tok = tokens[index++];
-                    int n;
                     var tee = new LocalTeeNode();
-                    if (tok.StartsWith("$"))
+                    if (tok.StartsWith("$", StringComparison.Ordinal))
                         tee.Name = tok;
-                    else if (int.TryParse(tok, out n))
+                    else if (int.TryParse(tok, out var n))
                         tee.Index = n;
 
                     if (index < tokens.Count && tokens[index] != ")")
@@ -839,11 +898,10 @@ namespace WasmToBoogie.Parser
                 else if (op == "global.get")
                 {
                     string tok = tokens[index++];
-                    int n;
                     var node = new GlobalGetNode();
-                    if (tok.StartsWith("$"))
+                    if (tok.StartsWith("$", StringComparison.Ordinal))
                         node.Name = tok;
-                    else if (int.TryParse(tok, out n))
+                    else if (int.TryParse(tok, out var n))
                         node.Index = n;
                     ExpectToken(tokens, ref index, ")");
                     return node;
@@ -851,14 +909,12 @@ namespace WasmToBoogie.Parser
                 else if (op == "global.set")
                 {
                     string tok = tokens[index++];
-                    int n;
                     var node = new GlobalSetNode();
-                    if (tok.StartsWith("$"))
+                    if (tok.StartsWith("$", StringComparison.Ordinal))
                         node.Name = tok;
-                    else if (int.TryParse(tok, out n))
+                    else if (int.TryParse(tok, out var n))
                         node.Index = n;
 
-                    // folded form: (global.set $g <expr>)
                     if (index < tokens.Count && tokens[index] != ")")
                         node.Value = ParseNode(tokens, ref index);
 
@@ -891,17 +947,11 @@ namespace WasmToBoogie.Parser
                 {
                     string? typeUse = null;
 
-                    // optional (type X)
-                    if (
-                        index < tokens.Count
-                        && tokens[index] == "("
-                        && index + 2 < tokens.Count
-                        && tokens[index + 1] == "type"
-                    )
+                    if (index < tokens.Count && tokens[index] == "(" && index + 2 < tokens.Count && tokens[index + 1] == "type")
                     {
-                        index += 2; // skip "(" "type"
-                        typeUse = tokens[index++]; // "0" or "$t"
-                        ExpectToken(tokens, ref index, ")"); // close (type ...)
+                        index += 2;
+                        typeUse = tokens[index++];
+                        ExpectToken(tokens, ref index, ")");
                     }
 
                     var exprs = new List<WasmNode>();
@@ -916,23 +966,13 @@ namespace WasmToBoogie.Parser
                     var calleeIndex = exprs[^1];
                     exprs.RemoveAt(exprs.Count - 1);
 
-                    return new CallIndirectNode
-                    {
-                        TypeUse = typeUse,
-                        Args = exprs,
-                        CalleeIndex = calleeIndex,
-                    };
+                    return new CallIndirectNode { TypeUse = typeUse, Args = exprs, CalleeIndex = calleeIndex };
                 }
                 else if (op == "return_call_indirect")
                 {
                     string? typeUse = null;
 
-                    if (
-                        index < tokens.Count
-                        && tokens[index] == "("
-                        && index + 2 < tokens.Count
-                        && tokens[index + 1] == "type"
-                    )
+                    if (index < tokens.Count && tokens[index] == "(" && index + 2 < tokens.Count && tokens[index + 1] == "type")
                     {
                         index += 2;
                         typeUse = tokens[index++];
@@ -946,19 +986,12 @@ namespace WasmToBoogie.Parser
                     ExpectToken(tokens, ref index, ")");
 
                     if (exprs.Count < 1)
-                        throw new Exception(
-                            "return_call_indirect: missing callee index expression."
-                        );
+                        throw new Exception("return_call_indirect: missing callee index expression.");
 
                     var calleeIndex = exprs[^1];
                     exprs.RemoveAt(exprs.Count - 1);
 
-                    return new ReturnCallIndirectNode
-                    {
-                        TypeUse = typeUse,
-                        Args = exprs,
-                        CalleeIndex = calleeIndex,
-                    };
+                    return new ReturnCallIndirectNode { TypeUse = typeUse, Args = exprs, CalleeIndex = calleeIndex };
                 }
                 else if (op == "return")
                 {
@@ -1248,7 +1281,12 @@ namespace WasmToBoogie.Parser
                 || op.Contains(".store32")
             )
                 return true;
-            if (op == "memory.size" || op == "memory.grow" || op == "memory.fill" || op == "memory.copy")
+            if (
+                op == "memory.size"
+                || op == "memory.grow"
+                || op == "memory.fill"
+                || op == "memory.copy"
+            )
                 return true;
 
             return false;
@@ -1343,7 +1381,7 @@ namespace WasmToBoogie.Parser
             var psi = new ProcessStartInfo
             {
                 FileName = "wat2wasm",
-                Arguments = $"{watPath} -o {wasmPath}",
+                Arguments = $"--debug-names --enable-annotations {watPath} -o {wasmPath}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -1394,6 +1432,27 @@ namespace WasmToBoogie.Parser
             EntryPoint = "GetFunctionResultCount",
             CallingConvention = CallingConvention.Cdecl
         )]
-        private static extern int GetFunctionResultCount(IntPtr module, int index);
+ private static extern int GetFunctionResultCount(IntPtr module, int index);
+       
+
+        // ===== Globals =====
+
+[DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
+private static extern int GetGlobalCount(IntPtr module);
+
+[DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
+private static extern IntPtr GetGlobalNameByIndex(IntPtr module, int index); // owned by Binaryen (do not free)
+
+[DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
+[return: MarshalAs(UnmanagedType.I1)]
+private static extern bool GetGlobalIsMutableByIndex(IntPtr module, int index);
+
+[DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
+private static extern IntPtr GetGlobalTypeByIndex(IntPtr module, int index); // returns "i32"/"i64"/"f32"/"f64" as strdup'ed (or owned: depends on your wrapper)
+
+[DllImport("libbinaryenwrapper", CallingConvention = CallingConvention.Cdecl)]
+private static extern IntPtr GetGlobalInitConstByIndex(IntPtr module, int index); // strdup'ed string, use FreeCString
+
+        
     }
 }

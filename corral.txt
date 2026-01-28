@@ -1,3 +1,3 @@
 Corral program verifier version 1.0.0.0
-BoogieOutputs/dynamic_predule.bpl(80,9): Error: undeclared identifier: $mem
+BoogieOutputs/dynamic_predule.bpl(8,7): Error: cannot refer to a global variable in this context: $globals_inited
 1 name resolution errors in BoogieOutputs/dynamic_predule.bpl
