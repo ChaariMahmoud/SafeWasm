@@ -52,40 +52,93 @@ datatype Instr {
   TableOpNode(toOp: TableOp, toIndex: Option Instr, toValue: Option Instr, toDelta: Option Instr)
 }
 
+datatype InstrList { INil(), ICons(head: Instr, tail: InstrList) }
+datatype IdentList { IdNil(), IdCons(head: Ident, tail: IdentList) }
+
+datatype Param { Param(pName: Option Ident, pType: ValType) }
+datatype ParamList { PNil(), PCons(head: Param, tail: ParamList) }
+
+datatype Function {
+  Function(
+    fnName: Option Ident,
+    fnParams: ParamList,
+    fnResultTypes: ValTypeList,
+    fnBody: InstrList
+  )
+}
+
+datatype FunctionList { FNil(), FCons(head: Function, tail: FunctionList) }
+datatype Module { Module(mdFunctions: FunctionList) }
+
 // ==============================================================================
 // 4. FONCTIONS SÉMANTIQUES PURES (Toutes avec {:inline})
 // ==============================================================================
-
 // --- Opérations Binaires ---
 function {:inline} eval_Add(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->rest is ConsStack && st->stStack->rest->top is I32Val && st->stStack->top is I32Val) then
-    State(ConsStack(I32Val(st->stStack->rest->top->i + st->stStack->top->i), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack && st->stStack->rest is ConsStack && st->stStack->rest->top is I64Val && st->stStack->top is I64Val) then
-    State(ConsStack(UndefVal(), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
+    var v1 := st->stStack->top;
+    var v2 := st->stStack->rest->top;
+    var restStack := st->stStack->rest->rest;
+    if (v2 is I32Val && v1 is I32Val) then
+      State(ConsStack(I32Val(v2->i + v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is I64Val && v1 is I64Val) then
+      State(ConsStack(I64Val(v2->i + v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F32Val && v1 is F32Val) then
+      State(ConsStack(F32Val(v2->f + v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F64Val && v1 is F64Val) then
+      State(ConsStack(F64Val(v2->f + v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
 function {:inline} eval_Sub(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->rest is ConsStack && st->stStack->rest->top is I32Val && st->stStack->top is I32Val) then
-    State(ConsStack(I32Val(st->stStack->rest->top->i - st->stStack->top->i), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
-    State(ConsStack(UndefVal(), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
+    var v1 := st->stStack->top;
+    var v2 := st->stStack->rest->top;
+    var restStack := st->stStack->rest->rest;
+    if (v2 is I32Val && v1 is I32Val) then
+      State(ConsStack(I32Val(v2->i - v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is I64Val && v1 is I64Val) then
+      State(ConsStack(I64Val(v2->i - v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F32Val && v1 is F32Val) then
+      State(ConsStack(F32Val(v2->f - v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F64Val && v1 is F64Val) then
+      State(ConsStack(F64Val(v2->f - v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
 function {:inline} eval_Mul(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->rest is ConsStack && st->stStack->rest->top is I32Val && st->stStack->top is I32Val) then
-    State(ConsStack(I32Val(st->stStack->rest->top->i * st->stStack->top->i), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
-    State(ConsStack(UndefVal(), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
+    var v1 := st->stStack->top;
+    var v2 := st->stStack->rest->top;
+    var restStack := st->stStack->rest->rest;
+    if (v2 is I32Val && v1 is I32Val) then
+      State(ConsStack(I32Val(v2->i * v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is I64Val && v1 is I64Val) then
+      State(ConsStack(I64Val(v2->i * v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F32Val && v1 is F32Val) then
+      State(ConsStack(F32Val(v2->f * v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is F64Val && v1 is F64Val) then
+      State(ConsStack(F64Val(v2->f * v1->f), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
 function {:inline} eval_DivS(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->rest is ConsStack && st->stStack->rest->top is I32Val && st->stStack->top is I32Val && st->stStack->top->i != 0) then
-    State(ConsStack(I32Val(st->stStack->rest->top->i div st->stStack->top->i), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
-    State(ConsStack(UndefVal(), st->stStack->rest->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack && st->stStack->rest is ConsStack) then
+    var v1 := st->stStack->top;
+    var v2 := st->stStack->rest->top;
+    var restStack := st->stStack->rest->rest;
+    if (v2 is I32Val && v1 is I32Val && v1->i != 0) then
+      State(ConsStack(I32Val(v2->i div v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v2 is I64Val && v1 is I64Val && v1->i != 0) then
+      State(ConsStack(I64Val(v2->i div v1->i), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
@@ -99,20 +152,33 @@ function {:inline} eval_BinOp(op: BinOp, st: State): State {
 
 // --- Opérations Unaires ---
 function {:inline} eval_Neg(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->top is I32Val) then
-    State(ConsStack(I32Val(-(st->stStack->top->i)), st->stStack->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack) then
-    State(ConsStack(UndefVal(), st->stStack->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack) then
+    var v := st->stStack->top;
+    var restStack := st->stStack->rest;
+    if (v is I32Val) then
+      State(ConsStack(I32Val(-(v->i)), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v is I64Val) then
+      State(ConsStack(I64Val(-(v->i)), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v is F32Val) then
+      State(ConsStack(F32Val(-(v->f)), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v is F64Val) then
+      State(ConsStack(F64Val(-(v->f)), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
 function {:inline} eval_Eqz(st: State): State {
-  if (st->stStack is ConsStack && st->stStack->top is I32Val && st->stStack->top->i == 0) then
-    State(ConsStack(I32Val(1), st->stStack->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack && st->stStack->top is I32Val) then
-    State(ConsStack(I32Val(0), st->stStack->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
-  else if (st->stStack is ConsStack) then
-    State(ConsStack(UndefVal(), st->stStack->rest), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+  if (st->stStack is ConsStack) then
+    var v := st->stStack->top;
+    var restStack := st->stStack->rest;
+    // En WebAssembly, eqz prend un i32 ou i64 et renvoie TOUJOURS un i32 (1 si zéro, 0 sinon)
+    if (v is I32Val) then
+      State(ConsStack(I32Val(if v->i == 0 then 1 else 0), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else if (v is I64Val) then
+      State(ConsStack(I32Val(if v->i == 0 then 1 else 0), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
+    else
+      State(ConsStack(UndefVal(), restStack), st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, st->stTables)
   else st
 }
 
@@ -123,6 +189,9 @@ function {:inline} eval_UnOp(op: UnOp, st: State): State {
 }
 
 // --- Mémoire et Tables ---
+// Note : Les adresses mémoire et les index de table sont TOUJOURS des i32 (ou i64 en Wasm64),
+// mais la valeur transmise dans TableSet peut être de n'importe quel type Value.
+
 function {:inline} eval_StoreI32(st: State, offset: int): State {
   if (st->stStack is ConsStack && st->stStack->rest is ConsStack && 
       st->stStack->top is I32Val && st->stStack->rest->top is I32Val &&
@@ -145,6 +214,7 @@ function {:inline} eval_LoadI32(st: State, offset: int): State {
 }
 
 function {:inline} eval_TableSet(st: State): State {
+  // L'index (rest->top) doit être un i32 >= 0, la valeur (top) peut être de n'importe quel type Value
   if (st->stStack is ConsStack && st->stStack->rest is ConsStack && 
       st->stStack->rest->top is I32Val && st->stStack->rest->top->i >= 0) then
     State(st->stStack->rest->rest, st->stMemory, st->stMemSize, st->stLocals, st->stGlobals, 
