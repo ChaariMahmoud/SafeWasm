@@ -5194,115 +5194,46 @@ if (mem.Op == "memory.fill")
 
     break;
 }
-if (mem.Op == "memory.copy")
-{
-    // Ordre de pile WebAssembly : dst, src, len
-    if (mem.Address != null)
-    {
-        TranslateNode(mem.Address, body);
-    }
+                        if (mem.Op == "memory.copy")
+                        {
+                            // WAT stack order: dst, src, len
+                            if (mem.Address != null)
+                                TranslateNode(mem.Address, body);
 
-    if (mem.Value != null)
-    {
-        TranslateNode(mem.Value, body);
-    }
+                            if (mem.Value != null)
+                                TranslateNode(mem.Value, body);
 
-    if (mem.Length != null)
-    {
-        TranslateNode(mem.Length, body);
-    }
+                            if (mem.Length != null)
+                                TranslateNode(mem.Length, body);
 
-    // Retrait dans l’ordre inverse.
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp1",
-            new(),
-            new()
-        )
-    ); // len
+                            body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // len
+                            body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // src
+                            body.AddStatement(new BoogieCallCmd("popToTmp3", new(), new())); // dst
 
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp2",
-            new(),
-            new()
-        )
-    ); // src
+                            body.AddStatement(
+                                new BoogieCallCmd(
+                                    "memory_copy",
+                                    new()
+                                    {
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp3") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp2") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp1") }
+                                        ),
+                                    },
+                                    new()
+                                )
+                            );
 
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp3",
-            new(),
-            new()
-        )
-    ); // dst
-
-    // Les trois opérandes de memory.copy sont des i32.
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp1(), "I32")
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp2(), "I32")
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                new BoogieIdentifierExpr("$tmp3"),
-                "I32"
-            )
-        )
-    );
-
-    BoogieExpr len =
-        I32Value(Tmp1());
-
-    BoogieExpr src =
-        I32Value(Tmp2());
-
-    BoogieExpr dst =
-        I32Value(
-            new BoogieIdentifierExpr("$tmp3")
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(len)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(src)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(dst)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "memory_copy",
-            new()
-            {
-                dst,
-                src,
-                len
-            },
-            new()
-        )
-    );
-
-    break;
-}
+                            break;
+                        }
                         // --- STORE path ---
                         bool isStore =
                             mem.Op

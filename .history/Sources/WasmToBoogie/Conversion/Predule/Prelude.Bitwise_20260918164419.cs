@@ -52,18 +52,6 @@ AddBuiltinFunction(
 
 AddBuiltinFunction(
     program,
-    "bv32_concat_bv32",
-    new List<BoogieType>
-    {
-        bv32,
-        bv32
-    },
-    bv64,
-    "concat"
-);
-
-AddBuiltinFunction(
-    program,
     "int_to_bv8",
     new List<BoogieType>
     {

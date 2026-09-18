@@ -2784,7 +2784,7 @@ private static bool IsTypedIntegerShiftOp(string op) =>
                     new BoogieGlobalVariable(
                         new BoogieTypedIdent(
                             "$mem",
-                            new BoogieMapType(BoogieType.Int, new BoogieCtorType("bv8"))
+                            new BoogieMapType(BoogieType.Int, BoogieType.Int)
                         )
                     )
                 );
@@ -4213,7 +4213,7 @@ private static bool IsTypedIntegerShiftOp(string op) =>
                     new BoogieGlobalVariable(
                         new BoogieTypedIdent(
                             "$mem",
-                            new BoogieMapType(BoogieType.Int, new BoogieCtorType("bv8"))
+                            new BoogieMapType(BoogieType.Int, BoogieType.Int)
                         )
                     )
                 );
@@ -4974,335 +4974,158 @@ void PopAddrComputeIdx()
                         }
                         switch (mem.Op)
                         {
-case "memory.size":
-{
-    body.AddStatement(
-        new BoogieCallCmd(
-            "memory_size",
-            new(),
-            new()
-            {
-                new BoogieIdentifierExpr("load_i")
-            }
-        )
-    );
+                            case "memory.size":
+                            {
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "memory_size",
+                                        new(),
+                                        new() { new BoogieIdentifierExpr("load_i") }
+                                    )
+                                );
 
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "push",
+                                        new()
+                                        {
+                                            new BoogieFunctionCall(
+                                                "int_to_real",
+                                                new() { new BoogieIdentifierExpr("load_i") }
+                                            ),
+                                        },
+                                        new()
+                                    )
+                                );
 
+                                break;
+                            }
 
-body.AddStatement(
-    new BoogieCallCmd(
-        "push",
-        new()
-        {
-            I32(
-                ToU32(
-                    new BoogieIdentifierExpr("load_i")
-                )
-            )
-        },
-        new()
-    )
-);
+                            case "memory.grow":
+                            {
+                                if (mem.Address != null)
+                                    TranslateNode(mem.Address, body);
 
-    break;
-}
+                                body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new()));
 
-case "memory.grow":
-{
-    if (mem.Address != null)
-    {
-        TranslateNode(mem.Address, body);
-    }
+                                body.AddStatement(
+                                    new BoogieAssignCmd(
+                                        new BoogieIdentifierExpr("idx"),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp1") }
+                                        )
+                                    )
+                                );
 
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp1",
-            new(),
-            new()
-        )
-    );
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "memory_grow",
+                                        new() { new BoogieIdentifierExpr("idx") },
+                                        new() { new BoogieIdentifierExpr("load_i") }
+                                    )
+                                );
 
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                Tmp1(),
-                "I32"
-            )
-        )
-    );
+                                body.AddStatement(
+                                    new BoogieCallCmd(
+                                        "push",
+                                        new()
+                                        {
+                                            new BoogieFunctionCall(
+                                                "int_to_real",
+                                                new() { new BoogieIdentifierExpr("load_i") }
+                                            ),
+                                        },
+                                        new()
+                                    )
+                                );
 
-    BoogieExpr delta =
-        I32Value(
-            Tmp1()
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(delta)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssignCmd(
-            new BoogieIdentifierExpr("idx"),
-            delta
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "memory_grow",
-            new()
-            {
-                new BoogieIdentifierExpr("idx")
-            },
-            new()
-            {
-                new BoogieIdentifierExpr("load_i")
-            }
-        )
-    );
-
-
-
-body.AddStatement(
-    new BoogieCallCmd(
-        "push",
-        new()
-        {
-            I32(
-                ToU32(
-                    new BoogieIdentifierExpr("load_i")
-                )
-            )
-        },
-        new()
-    )
-);
-    break;
-}
+                                break;
+                            }
                         }
 
                         if (mem.Op == "memory.size" || mem.Op == "memory.grow")
                             break;
-if (mem.Op == "memory.fill")
-{
-    // Ordre de pile WebAssembly : dst, value, len
-    if (mem.Address != null)
-    {
-        TranslateNode(mem.Address, body);
-    }
+                        if (mem.Op == "memory.fill")
+                        {
+                            // WAT stack order: dst, value, len
+                            if (mem.Address != null)
+                                TranslateNode(mem.Address, body);
 
-    if (mem.Value != null)
-    {
-        TranslateNode(mem.Value, body);
-    }
+                            if (mem.Value != null)
+                                TranslateNode(mem.Value, body);
 
-    if (mem.Length != null)
-    {
-        TranslateNode(mem.Length, body);
-    }
+                            if (mem.Length != null)
+                                TranslateNode(mem.Length, body);
 
-    // Retrait dans l’ordre inverse.
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp1",
-            new(),
-            new()
-        )
-    ); // len
+                            body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // len
+                            body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // value
+                            body.AddStatement(new BoogieCallCmd("popToTmp3", new(), new())); // dst
 
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp2",
-            new(),
-            new()
-        )
-    ); // value
+                            body.AddStatement(
+                                new BoogieCallCmd(
+                                    "memory_fill",
+                                    new()
+                                    {
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp3") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp2") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp1") }
+                                        ),
+                                    },
+                                    new()
+                                )
+                            );
 
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp3",
-            new(),
-            new()
-        )
-    ); // dst
+                            break;
+                        }
+                        if (mem.Op == "memory.copy")
+                        {
+                            // WAT stack order: dst, src, len
+                            if (mem.Address != null)
+                                TranslateNode(mem.Address, body);
 
-    // Les trois opérandes de memory.fill sont des i32.
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp1(), "I32")
-        )
-    );
+                            if (mem.Value != null)
+                                TranslateNode(mem.Value, body);
 
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp2(), "I32")
-        )
-    );
+                            if (mem.Length != null)
+                                TranslateNode(mem.Length, body);
 
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                new BoogieIdentifierExpr("$tmp3"),
-                "I32"
-            )
-        )
-    );
+                            body.AddStatement(new BoogieCallCmd("popToTmp1", new(), new())); // len
+                            body.AddStatement(new BoogieCallCmd("popToTmp2", new(), new())); // src
+                            body.AddStatement(new BoogieCallCmd("popToTmp3", new(), new())); // dst
 
-    BoogieExpr len =
-        I32Value(Tmp1());
+                            body.AddStatement(
+                                new BoogieCallCmd(
+                                    "memory_copy",
+                                    new()
+                                    {
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp3") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp2") }
+                                        ),
+                                        new BoogieFunctionCall(
+                                            "real_to_int",
+                                            new() { new BoogieIdentifierExpr("$tmp1") }
+                                        ),
+                                    },
+                                    new()
+                                )
+                            );
 
-    BoogieExpr value =
-        I32Value(Tmp2());
-
-    BoogieExpr dst =
-        I32Value(
-            new BoogieIdentifierExpr("$tmp3")
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(len)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(value)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(dst)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "memory_fill",
-            new()
-            {
-                dst,
-                value,
-                len
-            },
-            new()
-        )
-    );
-
-    break;
-}
-if (mem.Op == "memory.copy")
-{
-    // Ordre de pile WebAssembly : dst, src, len
-    if (mem.Address != null)
-    {
-        TranslateNode(mem.Address, body);
-    }
-
-    if (mem.Value != null)
-    {
-        TranslateNode(mem.Value, body);
-    }
-
-    if (mem.Length != null)
-    {
-        TranslateNode(mem.Length, body);
-    }
-
-    // Retrait dans l’ordre inverse.
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp1",
-            new(),
-            new()
-        )
-    ); // len
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp2",
-            new(),
-            new()
-        )
-    ); // src
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "popToTmp3",
-            new(),
-            new()
-        )
-    ); // dst
-
-    // Les trois opérandes de memory.copy sont des i32.
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp1(), "I32")
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(Tmp2(), "I32")
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                new BoogieIdentifierExpr("$tmp3"),
-                "I32"
-            )
-        )
-    );
-
-    BoogieExpr len =
-        I32Value(Tmp1());
-
-    BoogieExpr src =
-        I32Value(Tmp2());
-
-    BoogieExpr dst =
-        I32Value(
-            new BoogieIdentifierExpr("$tmp3")
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(len)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(src)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(dst)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "memory_copy",
-            new()
-            {
-                dst,
-                src,
-                len
-            },
-            new()
-        )
-    );
-
-    break;
-}
+                            break;
+                        }
                         // --- STORE path ---
                         bool isStore =
                             mem.Op
@@ -5398,95 +5221,6 @@ else if (
         new BoogieAssignCmd(
             new BoogieIdentifierExpr("store_i"),
             value
-        )
-    );
-}
-
-else if (mem.Op == "f32.store")
-{
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                Tmp2(),
-                "F32"
-            )
-        )
-    );
-
-    BoogieExpr value =
-        F32Value(
-            Tmp2()
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsF32(value)
-        )
-    );
-
-    BoogieExpr bits =
-        new BoogieFunctionCall(
-            "f32_real_to_bits",
-            new List<BoogieExpr>
-            {
-                value
-            }
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU32(bits)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssignCmd(
-            new BoogieIdentifierExpr("store_i"),
-            bits
-        )
-    );
-}
-else if (mem.Op == "f64.store")
-{
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsCtor(
-                Tmp2(),
-                "F64"
-            )
-        )
-    );
-
-    BoogieExpr value =
-        F64Value(
-            Tmp2()
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsF64(value)
-        )
-    );
-
-    BoogieExpr bits =
-        new BoogieFunctionCall(
-            "f64_real_to_bits",
-            new List<BoogieExpr>
-            {
-                value
-            }
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsU64(bits)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieAssignCmd(
-            new BoogieIdentifierExpr("store_i"),
-            bits
         )
     );
 }
@@ -5703,65 +5437,6 @@ void PushLoadedUnsignedI32()
     );
 }
 
-
-void PushLoadedF32()
-{
-    BoogieExpr value =
-        new BoogieFunctionCall(
-            "f32_bits_to_real",
-            new List<BoogieExpr>
-            {
-                loadVar
-            }
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsF32(value)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "push",
-            new List<BoogieExpr>
-            {
-                F32(value)
-            },
-            new()
-        )
-    );
-}
-
-void PushLoadedF64()
-{
-    BoogieExpr value =
-        new BoogieFunctionCall(
-            "f64_bits_to_real",
-            new List<BoogieExpr>
-            {
-                loadVar
-            }
-        );
-
-    body.AddStatement(
-        new BoogieAssertCmd(
-            IsF64(value)
-        )
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd(
-            "push",
-            new List<BoogieExpr>
-            {
-                F64(value)
-            },
-            new()
-        )
-    );
-}
-
                         void PushLoadedIntAsReal()
                         {
                             body.AddStatement(
@@ -5816,15 +5491,15 @@ void PushLoadedF64()
                                 PushLoadedI64();
                                 break;
 
-case "f32.load":
-    CallRead("mem_read_u32");
-    PushLoadedF32();
-    break;
+                            case "f32.load":
+                                CallRead("mem_read_u32");
+                                PushLoadedBits32AsReal();
+                                break;
 
-case "f64.load":
-    CallRead("mem_read_u64");
-    PushLoadedF64();
-    break;
+                            case "f64.load":
+                                CallRead("mem_read_u64");
+                                PushLoadedBits64AsReal();
+                                break;
 
 case "i32.load8_s":
     CallRead("mem_read_s8");

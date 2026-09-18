@@ -171,22 +171,12 @@ var fillPostcondition = new BoogieQuantifiedExpr(
                 memoryUnchanged
             );
 
-var framePostcondition = new BoogieQuantifiedExpr(
-    isForall: true,
-    qvars: new List<BoogieIdentifierExpr>
-    {
-        a
-    },
-    qvarTypes: new List<BoogieType>
-    {
-        BoogieType.Int
-    },
-    bodyExpr: frameEffect,
-    trigger: new List<BoogieExpr>
-    {
-        currentMemoryValue
-    }
-);
+            var framePostcondition = new BoogieQuantifiedExpr(
+                true,
+                new List<BoogieIdentifierExpr> { a },
+                new List<BoogieType> { BoogieType.Int },
+                frameEffect
+            );
 
             var postconditions = new List<BoogieExpr> { fillPostcondition, framePostcondition };
 
@@ -298,22 +288,12 @@ var framePostcondition = new BoogieQuantifiedExpr(
                 copiedValue
             );
 
-var copyPostcondition = new BoogieQuantifiedExpr(
-    isForall: true,
-    qvars: new List<BoogieIdentifierExpr>
-    {
-        i
-    },
-    qvarTypes: new List<BoogieType>
-    {
-        BoogieType.Int
-    },
-    bodyExpr: copyEffect,
-    trigger: new List<BoogieExpr>
-    {
-        destinationValue
-    }
-);
+            var copyPostcondition = new BoogieQuantifiedExpr(
+                true,
+                new List<BoogieIdentifierExpr> { i },
+                new List<BoogieType> { BoogieType.Int },
+                copyEffect
+            );
 
             /*
              * ensures forall a:int ::
@@ -365,22 +345,12 @@ var copyPostcondition = new BoogieQuantifiedExpr(
                 memoryUnchanged
             );
 
-var framePostcondition = new BoogieQuantifiedExpr(
-    isForall: true,
-    qvars: new List<BoogieIdentifierExpr>
-    {
-        a
-    },
-    qvarTypes: new List<BoogieType>
-    {
-        BoogieType.Int
-    },
-    bodyExpr: frameEffect,
-    trigger: new List<BoogieExpr>
-    {
-        currentMemoryValue
-    }
-);
+            var framePostcondition = new BoogieQuantifiedExpr(
+                true,
+                new List<BoogieIdentifierExpr> { a },
+                new List<BoogieType> { BoogieType.Int },
+                frameEffect
+            );
 
             var postconditions = new List<BoogieExpr> { copyPostcondition, framePostcondition };
 

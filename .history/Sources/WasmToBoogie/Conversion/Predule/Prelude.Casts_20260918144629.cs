@@ -399,7 +399,7 @@ private void AddReinterpretPrelude(
 
         var implication =
             new BoogieBinaryOperation(
-                BoogieBinaryOperation.Opcode.IMP,
+                BoogieBinaryOperation.Opcode.IMPLIES,
                 validBits,
                 sameBits
             );
@@ -530,7 +530,7 @@ private void AddReinterpretPrelude(
 
         var implication =
             new BoogieBinaryOperation(
-                BoogieBinaryOperation.Opcode.IMP,
+                BoogieBinaryOperation.Opcode.IMPLIES,
                 validBits,
                 validFloat
             );

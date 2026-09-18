@@ -7,60 +7,10 @@ namespace WasmToBoogie.Conversion
     {
 private void AddPreludeBitwise(BoogieProgram program)
 {
-var bv8 = new BoogieCtorType("bv8");
-var bv16 = new BoogieCtorType("bv16");
-var bv24 = new BoogieCtorType("bv24");
-var bv32 = new BoogieCtorType("bv32");
-var bv64 = new BoogieCtorType("bv64");
+    var bv8 = new BoogieCtorType("bv8");
+    var bv32 = new BoogieCtorType("bv32");
+    var bv64 = new BoogieCtorType("bv64");
 
-
-AddBuiltinFunction(
-    program,
-    "bv8_concat_bv8",
-    new List<BoogieType>
-    {
-        bv8,
-        bv8
-    },
-    bv16,
-    "concat"
-);
-
-AddBuiltinFunction(
-    program,
-    "bv16_concat_bv8",
-    new List<BoogieType>
-    {
-        bv16,
-        bv8
-    },
-    bv24,
-    "concat"
-);
-
-AddBuiltinFunction(
-    program,
-    "bv24_concat_bv8",
-    new List<BoogieType>
-    {
-        bv24,
-        bv8
-    },
-    bv32,
-    "concat"
-);
-
-AddBuiltinFunction(
-    program,
-    "bv32_concat_bv32",
-    new List<BoogieType>
-    {
-        bv32,
-        bv32
-    },
-    bv64,
-    "concat"
-);
 
 AddBuiltinFunction(
     program,
