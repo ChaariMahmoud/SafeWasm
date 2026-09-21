@@ -7,48 +7,72 @@ namespace WasmToBoogie.Conversion
     {
         private void AddPreludeTable(BoogieProgram program)
         {
+
+            var wasmValueType =
+    new BoogieCtorType("WasmValue");
+
+var tableType =
+    new BoogieMapType(
+        BoogieType.Int,
+        wasmValueType
+    );
             program.Declarations.Add(
                 new BoogieGlobalVariable(
-                    new BoogieTypedIdent(
-                        "$table",
-                        new BoogieMapType(BoogieType.Int, BoogieType.Real)
-                    )
+new BoogieTypedIdent(
+    "$table",
+    new BoogieMapType(
+        BoogieType.Int,
+        BoogieType.Real
+    )
+)
                 )
             );
 
             program.Declarations.Add(
-                new BoogieGlobalVariable(
-                    new BoogieTypedIdent("$table_size", BoogieType.Int)
-                )
+                new BoogieGlobalVariable(new BoogieTypedIdent("$table_size", BoogieType.Int))
             );
 
             var tableMods = new List<BoogieGlobalVariable>
             {
                 new BoogieGlobalVariable(
-                    new BoogieTypedIdent(
-                        "$table",
-                        new BoogieMapType(BoogieType.Int, BoogieType.Real)
-                    )
+new BoogieTypedIdent(
+    "$table",
+    new BoogieMapType(
+        BoogieType.Int,
+        BoogieType.Real
+    )
+)
                 ),
-                new BoogieGlobalVariable(
-                    new BoogieTypedIdent("$table_size", BoogieType.Int)
-                ),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$table_size", BoogieType.Int)),
             };
 
             // table_get(idx) returns result
             {
                 var ins = new List<BoogieVariable>
                 {
-                    new BoogieFormalParam(new BoogieTypedIdent("idx", BoogieType.Int))
+                    new BoogieFormalParam(new BoogieTypedIdent("idx", BoogieType.Int)),
                 };
 
                 var outs = new List<BoogieVariable>
                 {
-                    new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Real))
+                   new BoogieFormalParam(
+    new BoogieTypedIdent(
+        "result",
+        wasmValueType
+    )
+),
                 };
 
                 program.Declarations.Add(
-                    new BoogieProcedure("table_get", ins, outs, new() { new BoogieAttribute("inline", 1) }, new(), new(), new())
+                    new BoogieProcedure(
+                        "table_get",
+                        ins,
+                        outs,
+                        new() { new BoogieAttribute("inline", 1) },
+                        new(),
+                        new(),
+                        new()
+                    )
                 );
 
                 var body = new BoogieStmtList();
@@ -72,11 +96,24 @@ namespace WasmToBoogie.Conversion
                 var ins = new List<BoogieVariable>
                 {
                     new BoogieFormalParam(new BoogieTypedIdent("idx", BoogieType.Int)),
-                    new BoogieFormalParam(new BoogieTypedIdent("value", BoogieType.Real)),
+                   new BoogieFormalParam(
+    new BoogieTypedIdent(
+        "value",
+        wasmValueType
+    )
+),
                 };
 
                 program.Declarations.Add(
-                    new BoogieProcedure("table_set", ins, new(), new() { new BoogieAttribute("inline", 1) }, tableMods, new(), new())
+                    new BoogieProcedure(
+                        "table_set",
+                        ins,
+                        new(),
+                        new() { new BoogieAttribute("inline", 1) },
+                        tableMods,
+                        new(),
+                        new()
+                    )
                 );
 
                 var body = new BoogieStmtList();
@@ -99,11 +136,19 @@ namespace WasmToBoogie.Conversion
             {
                 var outs = new List<BoogieVariable>
                 {
-                    new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int))
+                    new BoogieFormalParam(new BoogieTypedIdent("result", BoogieType.Int)),
                 };
 
                 program.Declarations.Add(
-                    new BoogieProcedure("table_size", new(), outs, new() { new BoogieAttribute("inline", 1) }, new(), new(), new())
+                    new BoogieProcedure(
+                        "table_size",
+                        new(),
+                        outs,
+                        new() { new BoogieAttribute("inline", 1) },
+                        new(),
+                        new(),
+                        new()
+                    )
                 );
 
                 var body = new BoogieStmtList();
@@ -123,17 +168,30 @@ namespace WasmToBoogie.Conversion
             {
                 var ins = new List<BoogieVariable>
                 {
-                    new BoogieFormalParam(new BoogieTypedIdent("value", BoogieType.Real)),
+                    new BoogieFormalParam(
+    new BoogieTypedIdent(
+        "value",
+        wasmValueType
+    )
+),
                     new BoogieFormalParam(new BoogieTypedIdent("delta", BoogieType.Int)),
                 };
 
                 var outs = new List<BoogieVariable>
                 {
-                    new BoogieFormalParam(new BoogieTypedIdent("oldSize", BoogieType.Int))
+                    new BoogieFormalParam(new BoogieTypedIdent("oldSize", BoogieType.Int)),
                 };
 
                 program.Declarations.Add(
-                    new BoogieProcedure("table_grow", ins, outs, new() { new BoogieAttribute("inline", 1) }, tableMods, new(), new())
+                    new BoogieProcedure(
+                        "table_grow",
+                        ins,
+                        outs,
+                        new() { new BoogieAttribute("inline", 1) },
+                        tableMods,
+                        new(),
+                        new()
+                    )
                 );
 
                 var body = new BoogieStmtList();
