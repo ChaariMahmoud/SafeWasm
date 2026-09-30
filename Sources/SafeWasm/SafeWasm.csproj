@@ -1,0 +1,45 @@
+﻿<Project>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>SafeWasm</AssemblyName>
+    <TargetFramework>net9.0</TargetFramework>
+    <HighEntropyVA>true</HighEntropyVA>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>SafeWasm</PackageId>
+    <RepositoryUrl>https://github.com/ChaariMahmoud/SafeWasm</RepositoryUrl>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>SafeWasm</ToolCommandName>
+    <Description>A formal specification and verification tool for WebAssembly</Description>
+  </PropertyGroup>
+
+  <Import Project="..\SafeWasm.props" />
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="3.1.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="3.1.3" />
+    <ProjectReference Include="..\ExternalToolsManager\ExternalToolsManager.csproj" />
+    <ProjectReference Include="..\SolidityAST\SolidityAST.csproj" />
+    <ProjectReference Include="..\BoogieAST\BoogieAST.csproj" />
+    <ProjectReference Include="..\SolToBoogie\SolToBoogie.csproj" />
+    <ProjectReference Include="..\SharedConfig\SharedConfig.csproj" />
+    
+  </ItemGroup>
+
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\WasmToBoogie\WasmToBoogie.csproj" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

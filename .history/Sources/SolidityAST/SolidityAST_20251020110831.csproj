@@ -6,7 +6,7 @@
     <HighEntropyVA>true</HighEntropyVA> 
   </PropertyGroup>
 
-  <Import Project="..\SafeWasm.props" />
+  <Import Project="..\VeriSol.props" />
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
 
   <ItemGroup>

@@ -13,13 +13,18 @@ namespace WasmToBoogie.Parser.Ast
 
     public static class WasmCoverageAnalyzer
     {
-        public static WasmCoverageResult Analyze(WasmModule module)
+        public static WasmCoverageResult Analyze(
+            WasmModule module
+        )
         {
             int total = 0;
             int supported = 0;
             int unsupported = 0;
 
-            var unsupportedOps = new Dictionary<string, int>(StringComparer.Ordinal);
+            var unsupportedOps =
+                new Dictionary<string, int>(
+                    StringComparer.Ordinal
+                );
 
             /*
              * Les expressions constantes d'initialisation
@@ -45,7 +50,12 @@ namespace WasmToBoogie.Parser.Ast
                 }
             }
 
-            return new WasmCoverageResult(total, supported, unsupported, unsupportedOps);
+            return new WasmCoverageResult(
+                total,
+                supported,
+                unsupported,
+                unsupportedOps
+            );
 
             void CountSupported()
             {
@@ -53,17 +63,25 @@ namespace WasmToBoogie.Parser.Ast
                 supported++;
             }
 
-            void CountUnsupported(string? operation)
+            void CountUnsupported(
+                string? operation
+            )
             {
                 total++;
                 unsupported++;
 
-                string name = string.IsNullOrWhiteSpace(operation) ? "<unknown>" : operation;
+                string name =
+                    string.IsNullOrWhiteSpace(operation)
+                        ? "<unknown>"
+                        : operation;
 
-                unsupportedOps[name] = unsupportedOps.GetValueOrDefault(name) + 1;
+                unsupportedOps[name] =
+                    unsupportedOps.GetValueOrDefault(name) + 1;
             }
 
-            void Visit(WasmNode node)
+            void Visit(
+                WasmNode node
+            )
             {
                 switch (node)
                 {
@@ -87,7 +105,10 @@ namespace WasmToBoogie.Parser.Ast
                      * Opérations unaires.
                      */
                     case UnaryOpNode unary:
-                        if (WasmInstructionSupport.IsUnarySupported(unary.Op))
+                        if (
+                            WasmInstructionSupport
+                                .IsUnarySupported(unary.Op)
+                        )
                         {
                             CountSupported();
                         }
@@ -107,7 +128,10 @@ namespace WasmToBoogie.Parser.Ast
                      * Opérations binaires.
                      */
                     case BinaryOpNode binary:
-                        if (WasmInstructionSupport.IsBinarySupported(binary.Op))
+                        if (
+                            WasmInstructionSupport
+                                .IsBinarySupported(binary.Op)
+                        )
                         {
                             CountSupported();
                         }
@@ -146,7 +170,10 @@ namespace WasmToBoogie.Parser.Ast
 
                         if (ifNode.ElseBody != null)
                         {
-                            foreach (var instruction in ifNode.ElseBody)
+                            foreach (
+                                var instruction
+                                in ifNode.ElseBody
+                            )
                             {
                                 Visit(instruction);
                             }
@@ -251,7 +278,10 @@ namespace WasmToBoogie.Parser.Ast
                     case CallIndirectNode indirectCall:
                         CountSupported();
 
-                        foreach (var argument in indirectCall.Args)
+                        foreach (
+                            var argument
+                            in indirectCall.Args
+                        )
                         {
                             Visit(argument);
                         }
@@ -269,7 +299,10 @@ namespace WasmToBoogie.Parser.Ast
                     case ReturnCallNode returnCall:
                         CountSupported();
 
-                        foreach (var argument in returnCall.Args)
+                        foreach (
+                            var argument
+                            in returnCall.Args
+                        )
                         {
                             Visit(argument);
                         }
@@ -286,7 +319,10 @@ namespace WasmToBoogie.Parser.Ast
                     case ReturnCallIndirectNode returnIndirect:
                         CountSupported();
 
-                        foreach (var argument in returnIndirect.Args)
+                        foreach (
+                            var argument
+                            in returnIndirect.Args
+                        )
                         {
                             Visit(argument);
                         }
@@ -325,7 +361,10 @@ namespace WasmToBoogie.Parser.Ast
                      * Opérations mémoire.
                      */
                     case MemoryOpNode memory:
-                        if (WasmInstructionSupport.IsMemorySupported(memory.Op))
+                        if (
+                            WasmInstructionSupport
+                                .IsMemorySupported(memory.Op)
+                        )
                         {
                             CountSupported();
                         }
@@ -355,7 +394,10 @@ namespace WasmToBoogie.Parser.Ast
                      * Opérations sur les tables.
                      */
                     case TableOpNode table:
-                        if (WasmInstructionSupport.IsTableSupported(table.Op))
+                        if (
+                            WasmInstructionSupport
+                                .IsTableSupported(table.Op)
+                        )
                         {
                             CountSupported();
                         }
@@ -393,33 +435,61 @@ namespace WasmToBoogie.Parser.Ast
                      * Nouveau type de nœud non pris en compte.
                      */
                     default:
-                        CountUnsupported(node.GetType().Name);
+                        CountUnsupported(
+                            node.GetType().Name
+                        );
                         break;
                 }
             }
         }
 
-        public static void Print(WasmCoverageResult result)
+        public static void Print(
+            WasmCoverageResult result
+        )
         {
-            double percentage = result.Total == 0 ? 100.0 : 100.0 * result.Supported / result.Total;
+            double percentage =
+                result.Total == 0
+                    ? 100.0
+                    : 100.0
+                        * result.Supported
+                        / result.Total;
 
-            Console.WriteLine($"COVERAGE_TOTAL={result.Total}");
-
-            Console.WriteLine($"COVERAGE_SUPPORTED={result.Supported}");
-
-            Console.WriteLine($"COVERAGE_UNSUPPORTED={result.Unsupported}");
-
-            Console.WriteLine($"COVERAGE_PERCENT={percentage:F2}");
-
-            string operations = string.Join(
-                "; ",
-                result
-                    .UnsupportedOps.OrderByDescending(item => item.Value)
-                    .ThenBy(item => item.Key, StringComparer.Ordinal)
-                    .Select(item => $"{item.Key}:{item.Value}")
+            Console.WriteLine(
+                $"COVERAGE_TOTAL={result.Total}"
             );
 
-            Console.WriteLine($"COVERAGE_UNSUPPORTED_OPS={operations}");
+            Console.WriteLine(
+                $"COVERAGE_SUPPORTED={result.Supported}"
+            );
+
+            Console.WriteLine(
+                $"COVERAGE_UNSUPPORTED={result.Unsupported}"
+            );
+
+            Console.WriteLine(
+                $"COVERAGE_PERCENT={percentage:F2}"
+            );
+
+            string operations =
+                string.Join(
+                    "; ",
+                    result.UnsupportedOps
+                        .OrderByDescending(
+                            item => item.Value
+                        )
+                        .ThenBy(
+                            item => item.Key,
+                            StringComparer.Ordinal
+                        )
+                        .Select(
+                            item =>
+                                $"{item.Key}:{item.Value}"
+                        )
+                );
+
+            Console.WriteLine(
+                $"COVERAGE_UNSUPPORTED_OPS={operations}"
+            );
         }
     }
 }

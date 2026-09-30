@@ -3796,18 +3796,14 @@ namespace WasmToBoogie.Conversion
                 );
             }
 
-if (currentModule == null)
-{
-    throw new InvalidOperationException(
-        "Cannot build modifies set for an imported function "
-        + "without the current WebAssembly module."
-    );
-}
-
-var mods =
-    BuildAllMutableGlobalModSet(
-        currentModule
-    );
+            var mods = new List<BoogieGlobalVariable>
+            {
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp1", WasmValueBoogieType())),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp2", WasmValueBoogieType())),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$tmp3", WasmValueBoogieType())),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$sp", BoogieType.Int)),
+                new BoogieGlobalVariable(new BoogieTypedIdent("$stack", WasmStackBoogieType())),
+            };
 
             var proc = new BoogieProcedure(
                 name,
