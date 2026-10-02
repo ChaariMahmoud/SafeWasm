@@ -116,66 +116,71 @@
                     }
                 }
 
-                string? requestedEntryPoint;
-                string? harnessFile;
-                string? harnessProcedure;
+ string? requestedEntryPoint;
+string? harnessFile;
+string? harnessProcedure;
 
-                try
-                {
-                    requestedEntryPoint = ReadOption(args, "--entry-point");
-                    harnessFile = ReadOption(args, "--harness");
-                    harnessProcedure = ReadOption(args, "--harness-proc");
+try
+{
+    requestedEntryPoint = ReadOption(args, "--entry-point");
+    harnessFile = ReadOption(args, "--harness");
+    harnessProcedure = ReadOption(args, "--harness-proc");
 
-                    if (requestedEntryPoint != null && harnessFile != null)
-                    {
-                        throw new ArgumentException(
-                            "--entry-point and --harness cannot be used together."
-                        );
-                    }
+    if (requestedEntryPoint != null && harnessFile != null)
+    {
+        throw new ArgumentException(
+            "--entry-point and --harness cannot be used together."
+        );
+    }
 
-                    if ((harnessFile == null) != (harnessProcedure == null))
-                    {
-                        throw new ArgumentException(
-                            "--harness and --harness-proc must be used together."
-                        );
-                    }
+    if ((harnessFile == null) != (harnessProcedure == null))
+    {
+        throw new ArgumentException(
+            "--harness and --harness-proc must be used together."
+        );
+    }
 
-                    if (requestedEntryPoint != null)
-                    {
-                        requestedEntryPoint = requestedEntryPoint.TrimStart('$');
+    if (requestedEntryPoint != null)
+    {
+        requestedEntryPoint = requestedEntryPoint.TrimStart('$');
 
-                        if (requestedEntryPoint.Length == 0)
-                            throw new ArgumentException("The entry-point name cannot be empty.");
-                    }
+        if (requestedEntryPoint.Length == 0)
+            throw new ArgumentException("The entry-point name cannot be empty.");
+    }
 
-                    if (harnessFile != null)
-                    {
-                        harnessFile = Path.GetFullPath(harnessFile);
+    if (harnessFile != null)
+    {
+        harnessFile = Path.GetFullPath(harnessFile);
 
-                        if (!File.Exists(harnessFile))
-                            throw new ArgumentException($"Harness file not found: {harnessFile}");
-                    }
+        if (!File.Exists(harnessFile))
+            throw new ArgumentException($"Harness file not found: {harnessFile}");
+    }
 
-                    if (harnessProcedure != null)
-                    {
-                        // Première version : noms simples, sans motif wildcard.
-                        if (
-                            !System.Text.RegularExpressions.Regex.IsMatch(
-                                harnessProcedure,
-                                @"^[A-Za-z_$][A-Za-z0-9_$]*$"
-                            )
-                        )
-                        {
-                            throw new ArgumentException("Invalid harness procedure name.");
-                        }
-                    }
-                }
-                catch (ArgumentException ex)
-                {
-                    Console.Error.WriteLine(ex.Message);
-                    return 1;
-                }
+    if (harnessProcedure != null)
+    {
+        // Première version : noms simples, sans motif wildcard.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(
+            harnessProcedure,
+            @"^[A-Za-z_$][A-Za-z0-9_$]*$"
+        ))
+        {
+            throw new ArgumentException("Invalid harness procedure name.");
+        }
+    }
+}
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+} 
+if (requestedEntryPoint != null)
+{
+    Console.Error.WriteLine(
+        "--entry-point is not connected to the harness generator yet."
+    );
 
+    return 1;
+}             
 
                 if (noVerify)
                 {
@@ -184,12 +189,7 @@
                     // wasmTryRefutation = false;
                 }
 
-               var wasmTranslator = new WasmToBoogieMain(
-    wasmFile,
-    contractName,
-    requestedEntryPoint: requestedEntryPoint,
-    generateHarness: harnessFile == null
-);
+                var wasmTranslator = new WasmToBoogieMain(wasmFile, contractName);
                 var program = wasmTranslator.Translate();
 
                 var executor = new VeriSolExecutor(
@@ -206,14 +206,12 @@
 
                 Console.WriteLine("✅ WasmToBoogieMain call successful!");
                 executor.HarnessFile = harnessFile;
-                executor.HarnessProcedure = harnessProcedure;
+executor.HarnessProcedure = harnessProcedure;
 
 Console.WriteLine(
-    harnessFile != null
-        ? $"Harness mode: custom ({harnessProcedure})"
-        : requestedEntryPoint != null
-            ? $"Harness mode: targeted ({requestedEntryPoint})"
-            : "Harness mode: generic"
+    harnessFile == null
+        ? "Harness mode: generic"
+        : $"Harness mode: custom ({harnessProcedure})"
 );
                 return executor.Execute();
             }
@@ -265,27 +263,28 @@ Console.WriteLine(
             return verisolExecuter.Execute();
         }
 
-        private static string? ReadOption(string[] args, string option)
-        {
-            int index = Array.IndexOf(args, option);
 
-            if (index < 0)
-                return null;
+private static string? ReadOption(string[] args, string option)
+{
+    int index = Array.IndexOf(args, option);
 
-            if (Array.LastIndexOf(args, option) != index)
-                throw new ArgumentException($"Duplicate option: {option}");
+    if (index < 0)
+        return null;
 
-            if (
-                index + 1 >= args.Length
-                || args[index + 1].StartsWith("--", StringComparison.Ordinal)
-                || string.IsNullOrWhiteSpace(args[index + 1])
-            )
-            {
-                throw new ArgumentException($"Missing value after {option}.");
-            }
+    if (Array.LastIndexOf(args, option) != index)
+        throw new ArgumentException($"Duplicate option: {option}");
 
-            return args[index + 1].Trim();
-        }
+    if (
+        index + 1 >= args.Length
+        || args[index + 1].StartsWith("--", StringComparison.Ordinal)
+        || string.IsNullOrWhiteSpace(args[index + 1])
+    )
+    {
+        throw new ArgumentException($"Missing value after {option}.");
+    }
+
+    return args[index + 1].Trim();
+}
 
         private static void ShowUsage()
         {
@@ -296,6 +295,8 @@ Console.WriteLine(
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  SafeWasm --wasm <file.wat> [options]");
+            Console.WriteLine("  SafeWasm --config");
+            Console.WriteLine("  SafeWasm --validate");
 
             Console.WriteLine();
             Console.WriteLine("WebAssembly Options:");
@@ -306,8 +307,12 @@ Console.WriteLine(
                 "  --no-verify           Translate WAT to Boogie without running Boogie"
             );
             Console.WriteLine("  --coverage-only       Analyze instruction coverage only");
-            Console.WriteLine("  --harness <file.bpl>  Load a custom Boogie harness");
-            Console.WriteLine("  --harness-proc <name> Select the procedure in the custom harness");
+            Console.WriteLine(
+    "  --harness <file.bpl>  Load a custom Boogie harness"
+);
+Console.WriteLine(
+    "  --harness-proc <name> Select the procedure in the custom harness"
+);
 
             Console.WriteLine();
             Console.WriteLine("Tool Options:");
@@ -319,10 +324,6 @@ Console.WriteLine(
             Console.WriteLine("  SafeWasm --wasm contract.wat");
             Console.WriteLine("  SafeWasm --wasm eosio_contract.wat --entry-point apply");
             Console.WriteLine("  SafeWasm --wasm wasi_program.wat --entry-point _start");
-            Console.WriteLine(
-                "  safewasm --wasm contract.wat "
-                    + "--harness custom.bpl --harness-proc CustomHarness"
-            );
             Console.WriteLine("  SafeWasm --wasm contract.wat --no-verify");
             Console.WriteLine("  SafeWasm --wasm contract.wat --coverage-only");
             Console.WriteLine("  SafeWasm --config");

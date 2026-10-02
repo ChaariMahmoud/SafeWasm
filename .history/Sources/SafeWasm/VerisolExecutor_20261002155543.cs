@@ -162,7 +162,7 @@ namespace VeriSolRunner
                 return 1;
             }
 
-            return TryProof ? 1 : 0;
+            return 0;
         }
 
         private void WriteBoogieProgramToFile()
@@ -318,54 +318,6 @@ private bool FindProof()
             return false;
         }
 
-        private (string Output, int ExitCode) RunBoogie(
-    List<string> arguments
-)
-{
-    if (string.IsNullOrWhiteSpace(BoogiePath))
-    {
-        throw new InvalidOperationException(
-            "The Boogie executable path is empty."
-        );
-    }
-
-    var startInfo = new ProcessStartInfo
-    {
-        FileName = BoogiePath,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true,
-    };
-
-    foreach (string argument in arguments)
-        startInfo.ArgumentList.Add(argument);
-
-    Console.WriteLine(
-        $"Running Boogie: {BoogiePath} "
-        + string.Join(" ", arguments)
-    );
-
-    using var process = new Process { StartInfo = startInfo };
-
-    process.Start();
-
-    var stdoutTask = process.StandardOutput.ReadToEndAsync();
-    var stderrTask = process.StandardError.ReadToEndAsync();
-
-    process.WaitForExit();
-
-    string stdout = stdoutTask.GetAwaiter().GetResult();
-    string stderr = stderrTask.GetAwaiter().GetResult();
-
-    string output = stdout;
-
-    if (!string.IsNullOrWhiteSpace(stderr))
-        output += Environment.NewLine + stderr;
-
-    return (output, process.ExitCode);
-}
-
         private void DisplayTraceUsingConcurrencyExplorer()
         {
             const string concExplorerName = "ConcurrencyExplorer.exe";
@@ -478,27 +430,15 @@ private bool FindProof()
             return false;
         }
 
-private bool CompareBoogieOutput(string actual)
-{
-    if (string.IsNullOrWhiteSpace(actual))
-        return false;
+        private bool CompareBoogieOutput(string actual)
+        {
+            if (actual == null)
+            {
+                return false;
+            }
 
-    // Exige au moins une procédure vérifiée et aucun résultat
-    // supplémentaire tel qu'un timeout ou un résultat inconclusive.
-    var matches = Regex.Matches(
-        actual,
-        @"(?m)^Boogie program verifier finished with\s+"
-        + @"(?<verified>\d+)\s+verified,\s+0\s+errors"
-        + @"\.?\s*$"
-    );
-
-    if (matches.Count != 1)
-        return false;
-
-    return int.TryParse(
-        matches[0].Groups["verified"].Value,
-        out int verified
-    ) && verified > 0;
-}
+            return actual.Contains("Boogie program verifier finished with ")
+                && actual.Contains(" verified, 0 errors");
+        }
     }
 }

@@ -162,7 +162,7 @@ namespace VeriSolRunner
                 return 1;
             }
 
-            return TryProof ? 1 : 0;
+            return 0;
         }
 
         private void WriteBoogieProgramToFile()

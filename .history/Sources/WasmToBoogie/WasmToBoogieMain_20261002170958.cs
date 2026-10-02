@@ -16,18 +16,12 @@ namespace WasmToBoogie
         private readonly string? requestedEntryPoint;
 private readonly bool generateHarness;
 
-public WasmToBoogieMain(
-    string wasmPath,
-    string contractName,
-    string? requestedEntryPoint = null,
-    bool generateHarness = true
-)
-{
-    this.wasmPath = wasmPath;
-    this.contractName = contractName;
-    this.requestedEntryPoint = requestedEntryPoint;
-    this.generateHarness = generateHarness;
-}
+        public WasmToBoogieMain(string wasmPath, string contractName)
+        {
+            this.wasmPath = wasmPath;
+            this.contractName = contractName;
+        }
+
         public BoogieProgram Translate()
         {
             Console.WriteLine($"\uD83D\uDCD6 Reading WAT file: {wasmPath}");
@@ -36,11 +30,7 @@ public WasmToBoogieMain(
             var wasmAst = parser.Parse();
             Console.WriteLine($"✅ WAT AST generated with {wasmAst.Functions.Count} functions.");
 
-           var converter = new WasmAstToBoogie(
-    contractName,
-    requestedEntryPoint,
-    generateHarness
-);
+            var converter = new WasmAstToBoogie(contractName);
             BoogieProgram? boogieProgram = null;
             Exception? threadException = null;
 

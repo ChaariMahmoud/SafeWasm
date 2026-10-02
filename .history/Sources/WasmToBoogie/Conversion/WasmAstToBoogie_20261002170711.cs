@@ -2567,120 +2567,6 @@ namespace WasmToBoogie.Conversion
             return (proc, impl);
         }
 
-     private WasmFunction ResolveHarnessEntryPoint(WasmModule module)
-{
-    string requested = requestedEntryPoint!.Trim();
-
-    if (requested.StartsWith("$", StringComparison.Ordinal))
-        requested = requested.Substring(1);
-
-    if (requested.Length == 0)
-        throw new ArgumentException("The entry-point name cannot be empty.");
-
-    var matches = module.Functions
-        .Where(function =>
-            string.Equals(
-                function.Name.StartsWith("$", StringComparison.Ordinal)
-                    ? function.Name.Substring(1)
-                    : function.Name,
-                requested,
-                StringComparison.Ordinal
-            )
-        )
-        .ToList();
-
-    if (matches.Count != 1)
-    {
-        string available = string.Join(
-            ", ",
-            module.Functions.Select(function => function.Name)
-        );
-
-        throw new InvalidOperationException(
-            $"Expected exactly one defined WAT function named '{requested}', "
-            + $"but found {matches.Count}. "
-            + $"Available functions: {available}"
-        );
-    }
-
-    return matches[0];
-}
-
-private (BoogieProcedure proc, BoogieImplementation impl)
-    BuildTargetedBoogieEntry(WasmModule module, WasmFunction function)
-{
-    // Même préfixe : le runner sélectionne déjà BoogieEntry_*.
-    string name = $"BoogieEntry_{contractName}";
-
-    var body = new BoogieStmtList();
-    var locals = new List<BoogieVariable>();
-
-    // Initialisation identique à la harness générique.
-    body.AddStatement(
-        new BoogieCallCmd("initGlobals", new(), new())
-    );
-
-    body.AddStatement(
-        new BoogieCallCmd("InitRuntime", new(), new())
-    );
-
-    // Réutilise la génération typée des arguments existante.
-    EmitHavocPushArgs(function, body);
-
-    body.AddStatement(
-        new BoogieCallCmd(BoogieFuncName(function), new(), new())
-    );
-
-    // Après l'appel : uniquement les résultats restent sur la pile.
-    body.AddStatement(
-        new BoogieAssertCmd(
-            new BoogieBinaryOperation(
-                BoogieBinaryOperation.Opcode.EQ,
-                Id("$sp"),
-                IntLit(function.ResultCount)
-            )
-        )
-    );
-
-    if (function.ResultCount > 0)
-    {
-        EnsurePopDiscardProc(function.ResultCount);
-
-        body.AddStatement(
-            new BoogieCallCmd(
-                $"popDiscard{function.ResultCount}",
-                new(),
-                new()
-            )
-        );
-    }
-
-    var proc = new BoogieProcedure(
-        name,
-        new(),
-        new(),
-        attributes: null,
-        modSet: BuildAllMutableGlobalModSet(module),
-        pre: new List<BoogieExpr>(),
-        post: GetGlobalInvariantExprs()
-    );
-
-    var impl = new BoogieImplementation(
-        name,
-        new(),
-        new(),
-        locals,
-        body,
-        attributes: null
-    );
-
-    return (proc, impl);
-}
-
-
-
-
-
         private static void RemoveUnusedLabels(BoogieStmtList body)
         {
             if (body == null)
@@ -3884,20 +3770,11 @@ public WasmAstToBoogie(
             }
 
             // Construction de l’entrée, une seule fois.
-if (generateHarness)
-{
-    var entry = requestedEntryPoint == null
-        ? BuildBoogieEntry(wasmModule)
-        : BuildTargetedBoogieEntry(
-            wasmModule,
-            ResolveHarnessEntryPoint(wasmModule)
-        );
+            var (beP, beI) = BuildBoogieEntry(wasmModule);
 
-    p.Declarations.Add(entry.proc);
-    p.Declarations.Add(entry.impl);
-}
-
-return p;
+            p.Declarations.Add(beP);
+            p.Declarations.Add(beI);
+            return p;
         }
 
         // ============================================================

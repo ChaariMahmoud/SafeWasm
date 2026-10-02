@@ -162,7 +162,7 @@ namespace VeriSolRunner
                 return 1;
             }
 
-            return TryProof ? 1 : 0;
+            return 0;
         }
 
         private void WriteBoogieProgramToFile()
@@ -478,27 +478,15 @@ private bool FindProof()
             return false;
         }
 
-private bool CompareBoogieOutput(string actual)
-{
-    if (string.IsNullOrWhiteSpace(actual))
-        return false;
+        private bool CompareBoogieOutput(string actual)
+        {
+            if (actual == null)
+            {
+                return false;
+            }
 
-    // Exige au moins une procédure vérifiée et aucun résultat
-    // supplémentaire tel qu'un timeout ou un résultat inconclusive.
-    var matches = Regex.Matches(
-        actual,
-        @"(?m)^Boogie program verifier finished with\s+"
-        + @"(?<verified>\d+)\s+verified,\s+0\s+errors"
-        + @"\.?\s*$"
-    );
-
-    if (matches.Count != 1)
-        return false;
-
-    return int.TryParse(
-        matches[0].Groups["verified"].Value,
-        out int verified
-    ) && verified > 0;
-}
+            return actual.Contains("Boogie program verifier finished with ")
+                && actual.Contains(" verified, 0 errors");
+        }
     }
 }

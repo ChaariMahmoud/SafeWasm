@@ -208,13 +208,11 @@
                 executor.HarnessFile = harnessFile;
                 executor.HarnessProcedure = harnessProcedure;
 
-Console.WriteLine(
-    harnessFile != null
-        ? $"Harness mode: custom ({harnessProcedure})"
-        : requestedEntryPoint != null
-            ? $"Harness mode: targeted ({requestedEntryPoint})"
-            : "Harness mode: generic"
-);
+                Console.WriteLine(
+                    harnessFile == null
+                        ? "Harness mode: generic"
+                        : $"Harness mode: custom ({harnessProcedure})"
+                );
                 return executor.Execute();
             }
 

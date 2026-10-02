@@ -1,7 +1,6 @@
 namespace VeriSolRunner
 {
     using System;
-    using System.Text.RegularExpressions;
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
@@ -17,8 +16,6 @@ namespace VeriSolRunner
 
     internal class VeriSolExecutor
     {
-        public string? HarnessFile { get; set; }
-        public string? HarnessProcedure { get; set; }
         private string SolidityFilePath;
         private string SolidityFileDir;
         private string ContractName;
@@ -162,7 +159,7 @@ namespace VeriSolRunner
                 return 1;
             }
 
-            return TryProof ? 1 : 0;
+            return 0;
         }
 
         private void WriteBoogieProgramToFile()
@@ -214,52 +211,39 @@ namespace VeriSolRunner
             DeleteFileIfExists(counterexampleSummaryFileName);
         }
 
-private bool FindProof()
-{
-    string targetProcedure = HarnessProcedure ?? "BoogieEntry_*";
+        private bool FindProof()
+        {
+            var boogieArgs = new List<string>
+            {
+                "-inline:spec",
+                $"-inlineDepth:{translatorFlags.InlineDepthForBoogie}",
+                "-proc:BoogieEntry_*",
+                outFileName,
+            };
 
-    var boogieArgs = new List<string>
-    {
-        $"/proc:{targetProcedure}",
-        "/trace",
-        "/traceTimes",
-        "/tracePOs",
-        "/vcsSplitOnEveryAssert",
-        outFileName,
-    };
+            var boogieArgString = string.Join(" ", boogieArgs);
+            Console.WriteLine($"... running {BoogiePath} {boogieArgString}");
 
-    // Boogie lit les deux fichiers comme un même programme.
-    if (HarnessFile != null)
-        boogieArgs.Add(HarnessFile);
+            var boogieOut = RunBinary(BoogiePath, boogieArgString);
+            Console.WriteLine("Boogie.Command = " + BoogiePath);
 
-    var result = RunBoogie(boogieArgs);
+            const string boogieOutFile = "boogie.txt";
+            using (var bFile = new StreamWriter(boogieOutFile))
+            {
+                bFile.Write(boogieOut);
+            }
 
-    const string boogieOutFile = "boogie.txt";
+            if (CompareBoogieOutput(boogieOut))
+            {
+                Console.WriteLine(
+                    $"\t*** Proof found! Formal Verification successful! (see {boogieOutFile})"
+                );
+                return true;
+            }
 
-    File.WriteAllText(
-        boogieOutFile,
-        result.Output,
-        Encoding.UTF8
-    );
-
-    // Affiche les traces demandées dans le terminal.
-    Console.WriteLine(result.Output);
-
-    if (result.ExitCode == 0 && CompareBoogieOutput(result.Output))
-    {
-        Console.WriteLine(
-            $"Verification successful! (see {boogieOutFile})"
-        );
-
-        return true;
-    }
-
-    Console.WriteLine(
-        $"Verification failed or incomplete (see {boogieOutFile})"
-    );
-
-    return false;
-}
+            Console.WriteLine($"\t*** Did not find a proof (see {boogieOutFile})");
+            return false;
+        }
 
         private bool RunCorralForRefutation()
         {
@@ -317,54 +301,6 @@ private bool FindProof()
             Console.WriteLine($"\t*** Corral may have aborted abnormally (see {corralOutFile})");
             return false;
         }
-
-        private (string Output, int ExitCode) RunBoogie(
-    List<string> arguments
-)
-{
-    if (string.IsNullOrWhiteSpace(BoogiePath))
-    {
-        throw new InvalidOperationException(
-            "The Boogie executable path is empty."
-        );
-    }
-
-    var startInfo = new ProcessStartInfo
-    {
-        FileName = BoogiePath,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true,
-    };
-
-    foreach (string argument in arguments)
-        startInfo.ArgumentList.Add(argument);
-
-    Console.WriteLine(
-        $"Running Boogie: {BoogiePath} "
-        + string.Join(" ", arguments)
-    );
-
-    using var process = new Process { StartInfo = startInfo };
-
-    process.Start();
-
-    var stdoutTask = process.StandardOutput.ReadToEndAsync();
-    var stderrTask = process.StandardError.ReadToEndAsync();
-
-    process.WaitForExit();
-
-    string stdout = stdoutTask.GetAwaiter().GetResult();
-    string stderr = stderrTask.GetAwaiter().GetResult();
-
-    string output = stdout;
-
-    if (!string.IsNullOrWhiteSpace(stderr))
-        output += Environment.NewLine + stderr;
-
-    return (output, process.ExitCode);
-}
 
         private void DisplayTraceUsingConcurrencyExplorer()
         {
@@ -478,27 +414,15 @@ private bool FindProof()
             return false;
         }
 
-private bool CompareBoogieOutput(string actual)
-{
-    if (string.IsNullOrWhiteSpace(actual))
-        return false;
+        private bool CompareBoogieOutput(string actual)
+        {
+            if (actual == null)
+            {
+                return false;
+            }
 
-    // Exige au moins une procédure vérifiée et aucun résultat
-    // supplémentaire tel qu'un timeout ou un résultat inconclusive.
-    var matches = Regex.Matches(
-        actual,
-        @"(?m)^Boogie program verifier finished with\s+"
-        + @"(?<verified>\d+)\s+verified,\s+0\s+errors"
-        + @"\.?\s*$"
-    );
-
-    if (matches.Count != 1)
-        return false;
-
-    return int.TryParse(
-        matches[0].Groups["verified"].Value,
-        out int verified
-    ) && verified > 0;
-}
+            return actual.Contains("Boogie program verifier finished with ")
+                && actual.Contains(" verified, 0 errors");
+        }
     }
 }
